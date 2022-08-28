@@ -1,0 +1,18 @@
+[package]
+name = "SeaProtocol"
+version = "0.0.6" # Per SemVer
+
+[addresses]
+sea = "0x393a63f47da7a757a252cb44fbab2afe602efe9d88e8ae84aac7db4949a9beb0"
+
+# Mock users for unit tests
+user = "0x12"
+user_0 = "0x34"
+user_1 = "0x56"
+user_2 = "0x78"
+user_3 = "0x90"
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-core"
+subdir = "aptos-move/framework/aptos-framework"
+rev = "563e2abff8fa997aec81abe48772af8a20731f76"
