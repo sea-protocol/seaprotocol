@@ -125,6 +125,29 @@ module sea::rbtree {
         vector::push_back(&mut tree.nodes, node);
     }
 
+    public fun rb_find<V>(
+        tree: &RBTree<V>,
+        key: u128): u64 {
+        if (is_empty(tree)) {
+            return 0
+        };
+        let idx = tree.root;
+        loop {
+            let node = get_node(tree, idx);
+            if (key == node.key) {
+                return idx
+            };
+            if (key < node.key) {
+                idx = get_left_index(node.left_right);
+            } else {
+                idx = get_right_index(node.left_right);
+            };
+            if (idx == 0) {
+                return 0
+            }
+        }
+    }
+
     // Private functions ====================================================
 
     fun is_red(color: u64): bool {
