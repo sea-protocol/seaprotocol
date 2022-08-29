@@ -1,5 +1,5 @@
 [package]
-name = "SeaProtocol"
+name = "Sea"
 version = "0.0.6" # Per SemVer
 
 [addresses]
