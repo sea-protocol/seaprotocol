@@ -220,61 +220,106 @@ module sea::rbtree {
         }
     }
 
+    // is_red
+    // 
+    fun get_node_info<V>(node: &RBNode<V>): (
+        bool,
+        u64,
+        u64,
+        u64,
+        u64
+    ) {
+        (
+            is_red(node.color_parent),
+            get_position(node.color_parent),
+            get_parent_index(node.color_parent),
+            get_left_index(node.left_right),
+            get_right_index(node.left_right)
+        )
+    }
+
+    fun get_node_info_by_pos<V>(
+        nodes: &vector<RBNode<V>>,
+        node_pos: u64): (
+        bool,
+        u64,
+        u64,
+        u64
+    ) {
+        let node = get_node(nodes, node_pos);
+        (
+            is_red(node.color_parent),
+            get_parent_index(node.color_parent),
+            get_left_index(node.left_right),
+            get_right_index(node.left_right)
+        )
+    }
+
     // tree is NOT empty
     fun rb_remove_node<V>(
         tree: &mut RBTree<V>,
         pos: u64) {
+        let node_pos = pos;
+        let (
+            node_is_red,
+            node_parent_pos,
+            node_left_pos,
+            node_right_pos) = get_node_info_by_pos(&tree.nodes, pos);
         let nodes = &mut tree.nodes;
-        let node = get_node_mut(nodes, pos);
-        let node_pos = get_position(node.color_parent);
-        let (left, right) = get_left_right_index(node.left_right);
+        // let node_pos = get_position(node.color_parent);
+        // let (left, right) = get_left_right_index(node.left_right);
         let child_pos: u64;
-        let parent_pos: u64;
+        // let parent_pos: u64;
 
         // both left child and right child is NOT null
-        if (left != 0 && right != 0) {
-            let replace = get_node_least_node(nodes, node);
-            let replace_pos = get_position(replace.color_parent);
+        if (node_left_pos != 0 && node_right_pos != 0) {
+            let (
+                replace_is_red,
+                replace_pos,
+                replace_parent_pos,
+                _,
+                right_child_pos) = get_node_info(get_node_least_node(nodes, node_pos));
+            // let replace_pos = get_position(replace.color_parent);
             if (is_root(tree.root, node_pos)) {
                 tree.root = replace_pos;
             } else {
-                let node_parent = get_node_mut(nodes, get_parent_index(node.color_parent));
+                let node_parent = get_node_mut(nodes, node_parent_pos);
                 if (is_left_child(node_parent.left_right, node_pos)) {
                     set_node_left(node_parent, replace_pos);
                 } else {
                     set_node_right(node_parent, replace_pos);
                 }
             };
-            child_pos = get_right_index(replace.left_right);
-            let parent: &mut RBNode<V>;
-            parent_pos = get_parent_index(replace.color_parent);
-            if (node_pos == parent_pos) {
-                parent_pos = replace_pos;
+            // right_child_pos = get_right_index(replace.left_right);
+            // let parent: &mut RBNode<V>;
+            // replace_parent_pos = get_parent_index(replace.color_parent);
+            if (node_pos == replace_parent_pos) {
+                // parent_pos = replace_pos;
             } else {
-                if (child_pos != 0) {
+                if (right_child_pos != 0) {
                     // set child parent
-                    let child = get_node_mut(nodes, child_pos);
-                    set_node_parent(child, parent_pos);
+                    let child = get_node_mut(nodes, right_child_pos);
+                    set_node_parent(child, replace_parent_pos);
                 };
-                let parent = get_node_mut(nodes, parent_pos);
-                set_node_left(parent, child_pos);
-                let node_right = get_node_mut(nodes, get_right_index(node.left_right));
+                let parent = get_node_mut(nodes, replace_parent_pos);
+                set_node_left(parent, right_child_pos);
+                let node_right = get_node_mut(nodes, node_right_pos); // get_right_index(node.left_right));
                 set_node_parent(node_right, replace_pos);
             };
-            if (is_black(replace.color_parent))  {
+            if (!replace_is_red)  {
                 // 
-                rb_delete_rebalance(tree, child_pos, parent_pos);
+                rb_delete_rebalance(tree, right_child_pos, replace_parent_pos);
             };
-            // last vector swap
+            // todo last vector swap
             return
         };
 
-        if (left != 0) {
-            child_pos = get_left_index(node.left_right);
+        if (node_left_pos != 0) {
+            child_pos = node_left_pos; //get_left_index(node.left_right);
         } else {
-            child_pos = get_right_index(node.left_right);
+            child_pos = node_right_pos; // get_right_index(node.left_right);
         };
-        parent_pos = get_parent_index(node.color_parent);
+        let parent_pos = node_right_pos; // get_parent_index(node.color_parent);
         if (child_pos != 0) {
             let child = get_node_mut(nodes, child_pos);
             set_node_parent(child, parent_pos);
@@ -289,85 +334,175 @@ module sea::rbtree {
                 set_node_right(parent, child_pos);
             }
         };
-        if (is_black(node.color_parent)) {
+        if (!node_is_red) {
             rb_delete_rebalance(tree, child_pos, parent_pos);
         }
+    }
+
+    fun is_black_node<V>(
+        nodes: &vector<RBNode<V>>,
+        pos: u64): bool {
+        if (pos == 0) {
+            return true
+        };
+        let node   = get_node(nodes, pos);
+        is_black(node.color_parent)
+    }
+
+    fun get_child_color_is_black<V>(
+        nodes: &vector<RBNode<V>>,
+        left_pos: u64,
+        right_pos: u64): (bool, bool) {
+        let left_is_black = true;
+        let right_is_black = true;
+        if (left_pos != 0) {
+            let node   = get_node(nodes, left_pos);
+            left_is_black = is_black(node.color_parent);
+        };
+        if (right_pos != 0) {
+            let node = get_node(nodes, right_pos);
+            right_is_black = is_black(node.color_parent);
+        };
+        (left_is_black, right_is_black)
     }
 
     fun rb_delete_rebalance<V>(
         tree: &mut RBTree<V>,
         node_pos: u64,
         parent_pos: u64) {
-        let node = get_node_mut(tree.nodes, node_pos);
-        let other: &mut RBNode<V>;
+        // let nodes = &tree.nodes;
+        // let nodes_mut = &mut tree.nodes;
+        // let node = get_node_mut(nodes_mut, node_pos);
+        // let other: &mut RBNode<V>;
+        let (node_is_red,
+            node_parent_pos,
+            node_left_pos,
+            node_right_pos) = get_node_info_by_pos(&tree.nodes, node_pos);
 
-        while ((!is_root(tree.root, node_pos)) && (is_black(node.color_parent))) {
-            let parent = get_node_mut(tree.nodes, parent_pos);
-            if (is_left_child(parent.left_right, node_pos)) {
-                other = get_node_mut(tree.nodes, get_right_index(parent.left_right));
-                if (is_red(other.color_parent)) {
-                    set_black_color(other);
-                    set_red_color(parent);
-                    left_rotate(tree, parent);
-                    other = get_node_mut(tree.nodes, get_right_index(parent.left_right));
+        while ((!is_root(tree.root, node_pos)) && (!node_is_red)) {
+            let (
+                parent_is_red,
+                parent_parent_pos,
+                parent_left_pos,
+                parent_right_pos) = get_node_info_by_pos(&tree.nodes, parent_pos);
+            
+            if (parent_left_pos == node_pos) {
+                let other_pos = parent_right_pos;
+                let (
+                    other_is_red,
+                    other_parent_pos,
+                    other_left_pos,
+                    other_right_pos
+                ) = get_node_info_by_pos(&tree.nodes, parent_right_pos);
+                // other = get_node_mut(&mut tree.nodes, parent_right_pos); // get_right_index(parent.left_right));
+                if (other_is_red) {
+                    set_black_color(get_node_mut(&mut tree.nodes, other_pos));
+                    // let parent = get_node_mut(&mut tree.nodes, parent_pos);
+                    set_red_color(get_node_mut(&mut tree.nodes, parent_pos));
+                    left_rotate(tree, parent_pos, parent_parent_pos, parent_right_pos); // get_node_mut(&mut tree.nodes, parent_pos));
+                    // let other = get_node_mut(&mut tree.nodes, parent_right_pos); // get_right_index(parent.left_right));
+                    other_pos = parent_right_pos;
+                    (
+                        other_is_red,
+                        other_parent_pos,
+                        other_left_pos,
+                        other_right_pos
+                    ) = get_node_info_by_pos(&tree.nodes, parent_right_pos);
                 };
 
                 // both left and right child is black 
-                if (is_left_child_black(tree, other) && is_right_child_black(tree, other)) {
-                    set_red_color(other);
-                    node  = parent;
-                    node_pos = get_position(node);
-                    parent = get_node_mut(tree.nodes, get_parent_index(node.color_parent));
+                let (left_is_black, right_is_black) = get_child_color_is_black(&tree.nodes, other_left_pos, other_right_pos);
+                if (left_is_black && right_is_black) {
+                    set_red_color(get_node_mut(&mut tree.nodes, other_pos));
+                    // node  = parent;
+                    node_pos = parent_pos; // get_position(parent.color_parent);
+                    node_is_red = is_red(get_node(&tree.nodes, node_pos).color_parent);
+                    parent_pos = parent_parent_pos; // = get_node_mut(nodes_mut, node_parent_pos); // get_parent_index(node.color_parent));
                 } else {
                     // x brother w is black, and w left child is red, right child is black
-                    if (is_right_child_black(tree.nodes, other)) {
-                        set_node_color(nodes, get_left_index(other.left_right), false);
-                        set_red_color(other);
-                        right_rotate(tree, other);
-                        other = get_node_mut(tree.nodes, get_right_index(parent.left_right)); 
+                    if (right_is_black) {
+                        set_node_color(&mut tree.nodes, other_left_pos, false);
+                        set_red_color(get_node_mut(&mut tree.nodes, other_pos));
+                        right_rotate(tree, other_pos, other_parent_pos, other_left_pos);
+                        other_pos = parent_right_pos; // get_right_index(parent.left_right);
+                        // other = get_node_mut(nodes, get_right_index(parent.left_right)); 
                     };
-                    set_node_color(nodes, other, is_red(parent.color_parent));
+                    if (other_pos != 0) {
+                        set_node_color(&mut tree.nodes, other_pos, parent_is_red); // is_red(parent.color_parent));
+                        let other = get_node_mut(&mut tree.nodes, other_pos);
+                        set_node_color(&mut tree.nodes, get_right_index(other.left_right), false);
+                    };
+                    let parent = get_node_mut(&mut tree.nodes, parent_pos);
                     set_black_color(parent);
-                    set_node_color(nodes, get_right_index(other.left_right), false);
-                    left_rotate(tree, parent);
-                    node = get_node_mut(tree.nodes, tree.root);
-                    break;
+                    left_rotate(tree, get_position(parent.color_parent), get_parent_index(parent.color_parent), get_right_index(parent.left_right));
+                    // node = get_node_mut(nodes_mut, tree.root);
+                    node_pos = tree.root;
+                    // node_is_red = false;
+                    break
                 }
             } else {
-                other = get_node_mut(tree.nodes, get_left_index(parent.left_right));
-                if (is_red(other)) {
-                    set_black_color(other);
+                let other_pos = parent_left_pos;
+                let (
+                    other_is_red,
+                    other_parent_pos,
+                    other_left_pos,
+                    other_right_pos
+                ) = get_node_info_by_pos(&tree.nodes, parent_left_pos);
+                // other = get_node_mut(&mut tree.nodes, parent_left_pos); // get_left_index(parent.left_right));
+                if (other_is_red) {
+                    set_black_color(get_node_mut(&mut tree.nodes, other_pos));
+                    let parent = get_node_mut(&mut tree.nodes, parent_pos);
                     set_red_color(parent);
-                    right_rotate(tree, parent);
-                    other = get_node_mut(tree.nodes, get_left_index(parent.left_right));
+                    right_rotate(tree, parent_pos, parent_parent_pos, parent_left_pos);
+                    other_pos = parent_left_pos;
+                    (
+                        other_is_red,
+                        other_parent_pos,
+                        other_left_pos,
+                        other_right_pos
+                    ) = get_node_info_by_pos(&tree.nodes, parent_left_pos);
+                    // other = get_node_mut(&mut tree.nodes, get_left_index(parent.left_right));
                 };
 
-                if (is_left_child_black(tree, other) && is_right_child_black(tree, other)) {
-                    set_red_color(other);
-                    node = parent;
-                    node_pos = get_position(node);
-                    parent = get_node_mut(tree.nodes, get_parent_index(node.color_parent));
+                let (left_is_black, right_is_black) = get_child_color_is_black(&tree.nodes, other_left_pos, other_right_pos);
+                if (left_is_black && right_is_black) {
+                    set_red_color(get_node_mut(&mut tree.nodes, other_pos));
+                    // node = parent;
+                    node_pos = parent_pos; // get_position(node.color_parent);
+                    node_is_red = is_red(get_node(&tree.nodes, node_pos).color_parent);
+                    parent_pos = parent_parent_pos; //get_node_mut(nodes_mut, get_parent_index(parent.color_parent));
                 } else {
-                    if (is_left_child_black(tree.nodes, other)) {
-                        set_node_color(nodes, get_right_index(other.left_right), false);
-                        set_red_color(other);
-                        left_rotate(tree, other);
-                        other = get_node_mut(tree.nodes, get_left_index(parent.left_right)); 
+                    // let other_pos = 0;
+                    if (left_is_black) {
+                        set_node_color(&mut tree.nodes, other_right_pos, false);
+                        set_red_color(get_node_mut(&mut tree.nodes, other_pos));
+                        left_rotate(tree, other_pos, other_parent_pos, other_right_pos);
+                        other_pos = parent_left_pos; // get_left_index(parent.left_right);
+                        // other = get_node_mut(nodes, get_left_index(parent.left_right));
                     };
-                    set_node_color(nodes, other, is_red(parent.color_parent));
+                    if (other_pos != 0) {
+                        set_node_color(&mut tree.nodes, other_pos, parent_is_red);  // is_red(parent.color_parent));
+                        let other = get_node_mut(&mut tree.nodes, other_pos);
+                        set_node_color(&mut tree.nodes, get_left_index(other.left_right), false);
+                    };
+                    let parent = get_node_mut(&mut tree.nodes, parent_pos);
                     set_black_color(parent);
-                    set_node_color(nodes, get_left_index(other.left_right), false);
-                    right_rotate(tree, parent);
-                    node = get_node_mut(tree.nodes, tree.root);
-                    break;
+                    right_rotate(tree, parent_pos, parent_parent_pos, parent_left_pos);
+                    // node = get_node_mut(nodes_mut, tree.root);
+                    node_pos = tree.root;
+                    // node_is_red = false;
+                    break
                 }
             }
         };
         
-        set_black_color(node);
+        set_black_color(get_node_mut(&mut tree.nodes, node_pos));
     }
 
-    fun set_node_color<V>(nodes: &vector<RBNode<V>>, pos: u64, is_red: bool) {
+    fun set_node_color<V>(
+        nodes: &mut vector<RBNode<V>>,
+        pos: u64,
+        is_red: bool) {
         if (pos == 0) {
             return
         };
@@ -378,6 +513,7 @@ module sea::rbtree {
             set_black_color(node);
         }
     }
+
     // left child is black or nil
     fun is_left_child_black<V>(
         nodes: &vector<RBNode<V>>,
@@ -403,14 +539,15 @@ module sea::rbtree {
 
     fun get_node_least_node<V>(
         nodes: &vector<RBNode<V>>,
-        node: &RBNode<V>): &RBNode<V> {
-        let tmp: &RBNode<V> = node;
+        pos: u64): &RBNode<V> {
+        // let tmp: &RBNode<V> = node;
         loop {
-            let left = get_left_index(tmp.left_right);
+            let left_right = get_node(nodes, pos).left_right;
+            let left = get_left_index(left_right);
             if (left == 0) {
-                return tmp
+                return get_node(nodes, pos)
             };
-            tmp = get_node(nodes, left);
+            pos = left;
         }
     }
 
@@ -427,7 +564,7 @@ module sea::rbtree {
 
         // find the parent
         loop {
-            parent = get_node_mut<V>(&mut tree.nodes, parent_pos);
+            parent = get_node_mut(&mut tree.nodes, parent_pos);
             assert!(key != parent.key, E_DUP_KEY);
             if (key < parent.key) {
                 // left
@@ -457,7 +594,7 @@ module sea::rbtree {
             return
         };
         // rebalance the rbtree
-        rb_insert_rebalance<V>(tree, parent, node);
+        rb_insert_rebalance<V>(tree, parent_pos, node_pos);
     }
 
     fun is_left_child(left_right: u64, child_pos: u64): bool {
@@ -469,75 +606,115 @@ module sea::rbtree {
     }
 
     fun flip_color<V>(
-        grandad: &mut RBNode<V>,
-        parent: &mut RBNode<V>,
-        uncle: &mut RBNode<V>) {
-        set_red_color(grandad);
-        set_black_color(uncle);
-        set_black_color(parent);
+        nodes: &mut vector<RBNode<V>>,
+        grandad_pos: u64,
+        parent_pos: u64,
+        uncle_pos: u64) {
+        set_red_color(get_node_mut(nodes, grandad_pos));
+        set_black_color(get_node_mut(nodes, uncle_pos));
+        set_black_color(get_node_mut(nodes, parent_pos));
     }
 
     fun rb_insert_rebalance<V>(
         tree: &mut RBTree<V>,
-        parent: &mut RBNode<V>,
-        node: &mut RBNode<V>) {
-        let node_pos = get_position(node.color_parent);
-        while(is_red(parent.color_parent)) {
-            let grandad: &mut RBNode<V> = get_node_mut(&mut tree.nodes, get_parent_index(parent.color_parent));
-            let parent_pos = get_position(parent.color_parent);
+        parent_pos: u64,
+        node_pos: u64) {
+        // let node_pos = get_position(node.color_parent);
+        let (
+            parent_is_red,
+            grandad_pos,
+            parent_left_pos,
+            parent_right_pos
+        ) = get_node_info_by_pos(&tree.nodes, parent_pos);
+
+        while(parent_is_red) {
+            // let grandad: &mut RBNode<V> = get_node_mut(&mut tree.nodes, get_parent_index(parent.color_parent));
+            let (
+                grandad_is_red,
+                grandad_parent_pos,
+                grandad_left_pos,
+                grandad_right_pos
+            ) = get_node_info_by_pos(&tree.nodes, grandad_pos);
+            // let parent_pos = get_position(parent.color_parent);
             // parent is the left child of grandad
-            if (is_left_child(grandad.left_right, parent_pos)) {
-                let uncle_pos = get_right_index(grandad.left_right);
-                let uncle: &mut RBNode<V>;
+            // if (is_left_child(grandad.left_right, parent_pos)) {
+            if (grandad_left_pos == parent_pos) {
+                let uncle_pos = grandad_right_pos; // get_right_index(grandad.left_right);
 
                 // Case 1: uncle is not null and uncle is red node
                 if (uncle_pos != 0) {
-                    uncle = get_node_mut(&mut tree.nodes, uncle_pos);
+                    let uncle = get_node_mut(&mut tree.nodes, uncle_pos);
                     // Case 1: uncle is null or uncle is red node
                     if (is_red(uncle.color_parent)) {
-                        flip_color(grandad, parent, uncle);
-                        node = grandad;
-                        parent = get_node_mut(&mut tree.nodes, get_parent_index(node.color_parent));
+                        flip_color(&mut tree.nodes, grandad_pos, parent_pos, uncle_pos);
+                        node_pos = grandad_pos;
+                        parent_pos = grandad_parent_pos; //get_node_mut(&mut tree.nodes, get_parent_index(node.color_parent));
+                        (
+                            parent_is_red,
+                            grandad_pos,
+                            parent_left_pos,
+                            parent_right_pos
+                        ) = get_node_info_by_pos(&tree.nodes, parent_pos);
                         continue
                     }
                 };
                 // Case 2: uncle is black, and node is right node
-                if (is_right_child(parent.left_right, node_pos)) {
-                    left_rotate(tree, parent);
-                    let temp = parent;
-                    parent = node;
-                    node = temp;
+                // if (is_right_child(parent.left_right, node_pos)) {
+                if (parent_right_pos == node_pos) {
+                    left_rotate(tree, parent_pos, grandad_pos, parent_right_pos);
+                    let temp_pos = parent_pos;
+                    parent_pos = node_pos;
+                    node_pos = temp_pos;
                 };
                 // Case 3: uncle is black, and node is left node
-                set_black_color(parent);
-                set_red_color(grandad);
-                right_rotate(tree, grandad);
+                // set_black_color(parent);
+                set_node_color(&mut tree.nodes, parent_pos, false);
+                // set_red_color(grandad);
+                set_node_color(&mut tree.nodes, grandad_pos, true);
+                let grandad = get_node(&tree.nodes, grandad_pos);
+                grandad_left_pos = get_left_index(grandad.left_right);
+                right_rotate(tree, grandad_pos, grandad_parent_pos, grandad_left_pos);
             } else {
                 // Case 1: uncle is red
-                let uncle_pos = get_left_index(grandad.left_right);
-                let uncle: &mut RBNode<V>;
+                let uncle_pos = grandad_left_pos; // = get_left_index(grandad.left_right);
+                // let uncle: &mut RBNode<V>;
                 if (uncle_pos != 0) {
-                    uncle = get_node_mut(&mut tree.nodes, uncle_pos);
+                    let uncle = get_node_mut(&mut tree.nodes, uncle_pos);
                     // Case 1: uncle is null or uncle is red node
                     if (is_red(uncle.color_parent)) {
-                        flip_color(grandad, parent, uncle);
-                        node = grandad;
-                        parent = get_node_mut(&mut tree.nodes, get_parent_index(node.color_parent));
+                        flip_color(&mut tree.nodes, grandad_pos, parent_pos, uncle_pos);
+                        node_pos = grandad_pos;
+                        parent_pos = grandad_parent_pos; // get_node_mut(&mut tree.nodes, get_parent_index(node.color_parent));
+                        (
+                            parent_is_red,
+                            grandad_pos,
+                            parent_left_pos,
+                            parent_right_pos
+                        ) = get_node_info_by_pos(&tree.nodes, parent_pos);
                         continue
                     };
                 };
-                    // Case 2: uncle is black, and node is right child
-                    if (is_right_child(parent.left_right, node_pos)) {
-                        right_rotate(tree, parent);
-                        let temp = parent;
-                        parent = node;
-                        node = temp;
-                    };
-                    // Case 3: uncle is black andd nodee is left child
-                    set_black_color(parent);
-                    set_red_color(grandad);
-                    left_rotate(tree, grandad);
-            }
+                // Case 2: uncle is black, and node is right child
+                if (parent_right_pos == node_pos) {
+                    right_rotate(tree, parent_pos, grandad_pos, parent_left_pos);
+                    let temp_pos = parent_pos;
+                    parent_pos = node_pos;
+                    node_pos = temp_pos;
+                };
+                // Case 3: uncle is black andd nodee is left child
+                set_node_color(&mut tree.nodes, parent_pos, false);
+                let grandad = get_node_mut(&mut tree.nodes, grandad_pos);
+                set_red_color(grandad);
+                let grand_right_pos = get_right_index(grandad.left_right);
+                left_rotate(tree, grandad_pos, grandad_parent_pos, grand_right_pos);
+            };
+
+            (
+                parent_is_red,
+                grandad_pos,
+                parent_left_pos,
+                parent_right_pos
+            ) = get_node_info_by_pos(&tree.nodes, parent_pos);
         };
         set_black_color(get_node_mut(&mut tree.nodes, tree.root));
     }
@@ -552,27 +729,35 @@ module sea::rbtree {
      *     /   \                       /  \
      *    ly   ry                     lx  ly
      *
-     *  node: x
+     *  node_pos: x pos
+     *  px_pos: node parent pos
+     *  node_right_pos: node right child pos
      */
     fun left_rotate<V>(
         tree: &mut RBTree<V>,
-        node: &mut RBNode<V>) {
-        let node_pos = get_position(node.color_parent);
-        let px_pos = get_parent_index(node.color_parent);
+        node_pos: u64,
+        px_pos: u64,
+        node_right_pos: u64) {
+        // let node_pos = get_position(node.color_parent);
+        // let px_pos = get_parent_index(node.color_parent);
         let nodes = &mut tree.nodes;
-        let y: &mut RBNode<V> = get_node_right_child(nodes, node);
-        let y_pos = get_position(y.color_parent);
+        let (_,
+            y_pos,
+            _,
+            y_left_pos,
+            y_right_pos) = get_node_info(get_node_mut(nodes, node_right_pos));
+        // let y_pos = get_position(y.color_parent);
 
-        set_node_right(node, get_right_index(y.left_right));
+        set_node_right(get_node_mut(nodes, node_pos), y_right_pos);
 
-        let ly_index = get_left_index(y.left_right);
-        if (ly_index != 0) {
-            let ly: &mut RBNode<V> = get_node_mut(nodes, ly_index);
+        // let ly_index = get_left_index(y.left_right);
+        if (y_left_pos != 0) {
+            let ly: &mut RBNode<V> = get_node_mut(nodes, y_left_pos);
             set_node_parent<V>(ly, node_pos);
         };
-        set_node_parent(y, px_pos);
+        set_node_parent_by_pos(nodes, y_pos, px_pos);
         if (is_root(tree.root, node_pos)) {
-            tree.root = get_position(y.color_parent);
+            tree.root = y_pos; // get_position(y.color_parent);
         } else {
             let grandad = get_node_mut(nodes, px_pos);
             if (is_left_child(grandad.left_right, node_pos)) {
@@ -581,8 +766,9 @@ module sea::rbtree {
                 set_node_right(grandad, y_pos);
             }
         };
+        let y = get_node_mut(nodes, y_pos);
         set_node_left(y, node_pos);
-        set_node_parent(node, y_pos);
+        set_node_parent(get_node_mut(nodes, node_pos), y_pos);
     }
 
     fun is_root(root: u64,
@@ -599,27 +785,35 @@ module sea::rbtree {
      *       / \                                   / \                   #
      *      lx  rx                                rx  ry
      *
-     *  node: y
+     *  node_pos: y pos
+     *  py_pos: y parent pos
+     *  x_pos: y left child pos
      */
     fun right_rotate<V>(
         tree: &mut RBTree<V>,
-        node: &mut RBNode<V>) {
-        let node_pos = get_position(node.color_parent);
-        let py_pos = get_parent_index(node.color_parent);
+        node_pos: u64,
+        py_pos: u64,
+        x_pos: u64) {
+        // let node_pos = get_position(node.color_parent);
+        // let py_pos = get_parent_index(node.color_parent);
         let nodes = &mut tree.nodes;
-        let x: &mut RBNode<V> = get_node_left_child(nodes, node);
-        let x_pos = get_position(x.color_parent);
+        // let x: &mut RBNode<V> = get_node_left_child(nodes, node);
+        // let x_pos = get_position(x.color_parent);
+        let (_,
+            _,
+            x_left_pos,
+            x_right_pos) = get_node_info_by_pos(nodes, x_pos); // (get_node_left_child(nodes, node));
 
-        set_node_left(node, get_left_index(x.left_right));
-        let rx_index = get_right_index(x.left_right);
-        if (rx_index > 0) {
-            let rx = get_node_mut(nodes, rx_index);
+        set_node_left(get_node_mut(nodes, node_pos), x_left_pos); // get_left_index(x.left_right));
+        // let rx_index = get_right_index(x.left_right);
+        if (x_right_pos > 0) {
+            let rx = get_node_mut(nodes, x_right_pos);
             set_node_parent(rx, node_pos);
         };
 
-        set_node_parent(x, py_pos);
+        set_node_parent_by_pos(nodes, x_pos, py_pos);
         if (is_root(tree.root, node_pos)) {
-            tree.root = get_position(x.color_parent);
+            tree.root = x_pos; // get_position(x.color_parent);
         } else {
             let grandad = get_node_mut(nodes, py_pos);
             if (is_right_child(grandad.left_right, node_pos)) {
@@ -628,8 +822,8 @@ module sea::rbtree {
                 set_node_left(grandad, x_pos);
             }
         };
-        set_node_right(x, node_pos);
-        set_node_parent(node, x_pos);
+        set_node_right(get_node_mut(nodes, x_pos), node_pos);
+        set_node_parent(get_node_mut(nodes, node_pos), x_pos);
     }
 
     fun set_red_color<V>(node: &mut RBNode<V>) {
@@ -641,6 +835,14 @@ module sea::rbtree {
     }
 
     fun set_node_parent<V>(node: &mut RBNode<V>, parent_pos: u64) {
+        node.color_parent =  node.color_parent | parent_pos;
+    }
+
+    fun set_node_parent_by_pos<V>(
+        nodes: &mut vector<RBNode<V>>,
+        node_pos: u64,
+        parent_pos: u64) {
+        let node = get_node_mut(nodes, node_pos);
         node.color_parent =  node.color_parent | parent_pos;
     }
 
