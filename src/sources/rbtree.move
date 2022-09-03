@@ -27,7 +27,7 @@ module sea::rbtree {
     use std::vector;
 
     /// A rbtree node
-    struct RBNode<V> has store {
+    struct RBNode<V> has store, drop {
         // color is the first 1 bit
         // pos is the follow 31 bits
         // parent is the last 32 bits
@@ -375,9 +375,9 @@ module sea::rbtree {
         // let node = get_node_mut(nodes_mut, node_pos);
         // let other: &mut RBNode<V>;
         let (node_is_red,
-            node_parent_pos,
-            node_left_pos,
-            node_right_pos) = get_node_info_by_pos(&tree.nodes, node_pos);
+            _,
+            _,
+            _) = get_node_info_by_pos(&tree.nodes, node_pos);
 
         while ((!is_root(tree.root, node_pos)) && (!node_is_red)) {
             let (
@@ -403,7 +403,7 @@ module sea::rbtree {
                     // let other = get_node_mut(&mut tree.nodes, parent_right_pos); // get_right_index(parent.left_right));
                     other_pos = parent_right_pos;
                     (
-                        other_is_red,
+                        _,
                         other_parent_pos,
                         other_left_pos,
                         other_right_pos
@@ -456,7 +456,7 @@ module sea::rbtree {
                     right_rotate(tree, parent_pos, parent_parent_pos, parent_left_pos);
                     other_pos = parent_left_pos;
                     (
-                        other_is_red,
+                        _,
                         other_parent_pos,
                         other_left_pos,
                         other_right_pos
@@ -630,7 +630,7 @@ module sea::rbtree {
         while(parent_is_red) {
             // let grandad: &mut RBNode<V> = get_node_mut(&mut tree.nodes, get_parent_index(parent.color_parent));
             let (
-                grandad_is_red,
+                _,
                 grandad_parent_pos,
                 grandad_left_pos,
                 grandad_right_pos
@@ -912,6 +912,22 @@ module sea::rbtree {
         let left_right = vector::borrow<RBNode<V>>(&tree.nodes, pos).left_right;
         (get_left_index(left_right), get_right_index(left_right))
     }
+
     // Test-only functions ====================================================
 
+    // Tests ==================================================================
+    #[test]
+    fun test_is_empty(): RBTree<u64> {
+        let tree = empty<u64>();
+        assert!(is_empty(&tree), 1);
+        tree
+    }
+
+        #[test]
+    fun test_insert_empty(): RBTree<u64> {
+        let tree = empty<u64>();
+        rb_insert<u64>(&mut tree, 1, 1);
+        assert!(tree.root == 1, 1);
+        tree
+    }
 }
