@@ -1115,37 +1115,59 @@ module sea::rbtree {
 
         rb_insert<u64>(&mut tree, 200, 200);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 200);
         // debug::print(&tree.root);
 
         rb_insert<u64>(&mut tree, 300, 300);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 300);
 
         rb_insert<u64>(&mut tree, 320, 320);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 320);
 
         rb_insert<u64>(&mut tree, 720, 720);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 720);
 
         rb_insert<u64>(&mut tree, 800, 800);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 800);
 
         rb_insert<u64>(&mut tree, 1800, 1800);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 1800);
 
         rb_insert<u64>(&mut tree, 2500, 2500);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 2500);
 
         rb_insert<u64>(&mut tree, 3000, 3000);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 3000);
 
         rb_insert<u64>(&mut tree, 250, 250);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 250);
 
         rb_insert<u64>(&mut tree, 450, 450);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 450);
 
         rb_insert<u64>(&mut tree, 660, 660);
         assert!(tree.leftmost == 6, 6);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 600);
 
         // let nodes = validate_tree(&tree);
         // assert!(length(&tree) == nodes, 0);
