@@ -57,6 +57,7 @@ module sea::rbtree {
     const COLOR_MASK: u64 = 0x8000000000000000;
     const POS_MASK: u64 = 0x7fffffff00000000;
     const PARENT_MASK: u64 = 0x00000000ffffffff;
+    const PARENT_CLEAR_MASK: u64 = 0xffffffff00000000;
     const LEFT_MASK: u64  = 0xffffffff00000000;
     const RIGHT_MASK: u64 = 0x00000000ffffffff;
     const RED: u64 = 0x8000000000000000;
@@ -554,7 +555,11 @@ module sea::rbtree {
         // let tmp: &RBNode<V> = node;
         loop {
             let left_right = get_node(nodes, pos).left_right;
+            // debug::print(&444444444);
+            // debug::print(&pos);
+            // debug::print(&left_right);
             let left = get_left_index(left_right);
+            // debug::print(&left);
             if (left == 0) {
                 return pos
             };
@@ -706,9 +711,8 @@ module sea::rbtree {
                 // Case 3: uncle is black, and node is left node
                 // set_black_color(parent);
                 set_node_color(&mut tree.nodes, parent_pos, false);
-                // set_red_color(grandad);
-                set_node_color(&mut tree.nodes, grandad_pos, true);
-                let grandad = get_node(&tree.nodes, grandad_pos);
+                let grandad = get_node_mut(&mut tree.nodes, grandad_pos);
+                set_red_color(grandad);
                 grandad_left_pos = get_left_index(grandad.left_right);
                 right_rotate(tree, grandad_pos, grandad_parent_pos, grandad_left_pos);
             } else {
@@ -780,11 +784,13 @@ module sea::rbtree {
         let nodes = &mut tree.nodes;
         let y_left_pos = get_left_index(get_node_mut(nodes, y_pos).left_right);
 
+        // debug::print(&10000000000000);
+        // debug::print(&px_pos);
         if (y_left_pos != 0) {
             let ly: &mut RBNode<V> = get_node_mut(nodes, y_left_pos);
             set_node_parent<V>(ly, x_pos);
         };
-        set_node_parent_by_pos(nodes, y_pos, px_pos);
+        // set_node_parent_by_pos(nodes, y_pos, px_pos);
         if (is_root(tree.root, x_pos)) {
             tree.root = y_pos;
         } else {
@@ -797,17 +803,25 @@ module sea::rbtree {
         };
         let y = get_node_mut(nodes, y_pos);
         set_node_left(y, x_pos);
+        set_node_parent(y, px_pos);
 
         // set node parent, node right child
         let node = get_node_mut(nodes, x_pos);
         set_node_right(node, y_left_pos);
         set_node_parent(node, y_pos);
+        // debug::print(&x_pos);
+        // debug::print(&tree.root);
+        // debug::print(&10000000000000);
+        // let y = get_node(nodes, y_pos);
+        // debug::print(&y.left_right);
+        // debug::print(&y.color_parent);
     }
 
     fun is_root(root: u64,
         node_pos: u64): bool {
         root == node_pos
     }
+
     /*
      *
      *            py                               py
@@ -835,7 +849,6 @@ module sea::rbtree {
             set_node_parent(rx, y_pos);
         };
 
-        set_node_parent_by_pos(nodes, x_pos, py_pos);
         if (is_root(tree.root, y_pos)) {
             tree.root = x_pos; // get_position(x.color_parent);
         } else {
@@ -846,11 +859,16 @@ module sea::rbtree {
                 set_node_left(grandad, x_pos);
             }
         };
-        set_node_right(get_node_mut(nodes, x_pos), y_pos);
+        let x = get_node_mut(nodes, x_pos);
+        set_node_right(x, y_pos);
+        set_node_parent(x, py_pos);
 
         let y = get_node_mut(nodes, y_pos);
         set_node_left(y, x_right_pos);
         set_node_parent(y, x_pos);
+        // debug::print(&200000000000000);
+        // debug::print(&y_pos);
+        // debug::print(&x_right_pos);
     }
 
     fun set_red_color<V>(node: &mut RBNode<V>) {
@@ -862,7 +880,8 @@ module sea::rbtree {
     }
 
     fun set_node_parent<V>(node: &mut RBNode<V>, parent_pos: u64) {
-        node.color_parent =  node.color_parent | parent_pos;
+        // node.color_parent = node.color_parent & PARENT_CLEAR_MASK;
+        node.color_parent = (node.color_parent & PARENT_CLEAR_MASK) | parent_pos;
     }
 
     fun set_node_parent_by_pos<V>(
@@ -870,15 +889,16 @@ module sea::rbtree {
         node_pos: u64,
         parent_pos: u64) {
         let node = get_node_mut(nodes, node_pos);
-        node.color_parent =  node.color_parent | parent_pos;
+        // node.color_parent = node.color_parent & PARENT_CLEAR_MASK;
+        node.color_parent = (node.color_parent & PARENT_CLEAR_MASK) | parent_pos;
     }
 
     fun set_node_left<V>(node: &mut RBNode<V>, left_pos: u64) {
-        node.left_right =  node.left_right | (left_pos << 32);
+        node.left_right = (node.left_right & (0x00000000ffffffff)) | (left_pos << 32);
     }
 
     fun set_node_right<V>(node: &mut RBNode<V>, right_pos: u64) {
-        node.left_right =  node.left_right | right_pos;
+        node.left_right =  (node.left_right & (0xffffffff00000000)) | right_pos;
     }
     
     /// set parent left child or right child
@@ -951,18 +971,45 @@ module sea::rbtree {
         let node = get_node(&tree.nodes, pos);
         let right_pos = get_right_index(node.left_right);
 
+        // debug::print(&33333333333);
+        // debug::print(&pos);
+        // debug::print(&right_pos);
         if (right_pos > 0) {
-            get_node_least_pos(&tree.nodes, right_pos)
+            // debug::print(&3333333666);
+            return get_node_least_pos(&tree.nodes, right_pos)
         } else {
             let parent_pos = get_parent_index(node.color_parent);
-            if (parent_pos == 0) {
-                return 0
+            loop {
+                // parent_pos = get_parent_index(node.color_parent);
+                if (parent_pos == 0) {
+                    return 0
+                };
+                let parent = get_node(&tree.nodes, parent_pos);
+                // debug::print(&3333333777);
+                // debug::print(&pos);
+                // debug::print(&parent_pos);
+                // debug::print(&parent.left_right);
+                if (is_right_child(parent.left_right, pos)) {
+                    pos = parent_pos;
+                    parent_pos = get_parent_index(parent.color_parent)
+                } else {
+                    break
+                }
             };
-            let parent = get_node(&tree.nodes, parent_pos);
-            if (is_left_child(parent.color_parent, pos)) {
-                return parent_pos
-            };
-            next_pos(tree, parent_pos)
+            parent_pos
+        //     let parent_pos = get_parent_index(node.color_parent);
+        //     if (parent_pos == 0) {
+        //                 debug::print(&parent_pos);
+        // debug::print(&3333333555);
+        //         return 0
+        //     };
+        //     let parent = get_node(&tree.nodes, parent_pos);
+        //     if (is_left_child(parent.color_parent, pos)) {
+        // debug::print(&parent_pos);
+        // debug::print(&3333333444);
+        //         return parent_pos
+        //     };
+        //     next_pos(tree, parent_pos)
         }
     }
 
@@ -972,7 +1019,10 @@ module sea::rbtree {
         let pos = tree.leftmost;
         let nodes = 1;
     
+        // debug::print(&111111111111);
+        // debug::print(&pos);
         loop {
+        // debug::print(&pos);
             let node = get_node(&tree.nodes, pos);
             let (
                 node_is_red,
@@ -1006,8 +1056,8 @@ module sea::rbtree {
                 let child_is_red = is_red(child.color_parent);
                 assert!(child_pos == node_right_pos, 20);
                 if (pos != child_parent_pos) {
-                    debug::print(&pos);
-                    debug::print(&child_parent_pos);
+                    // debug::print(&pos);
+                    // debug::print(&child_parent_pos);
                 };
                 assert!(pos == child_parent_pos, 21);
                 if (node_is_red) {
@@ -1016,12 +1066,14 @@ module sea::rbtree {
                 assert!(child.key > node.key, 23);
             };
 
-            let pos = next_pos(tree, pos);
+            pos = next_pos(tree, pos);
             if (pos == 0) {
                 break
             };
+            // debug::print(&pos);
             nodes = nodes + 1;
         };
+        // debug::print(&111111111222);
         nodes
     }
 
@@ -1067,13 +1119,19 @@ module sea::rbtree {
         let nodes = validate_tree(&tree);
         assert!(length(&tree) == nodes, 600);
 
+        debug::print(&1600);
         rb_insert<u64>(&mut tree, 1600, 1600);
         // assert!(tree.root == 1, 1);
         // assert!(tree.root == 3, 3);
         assert!(tree.leftmost == 2, 2);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 1600);
 
+        debug::print(&2000);
         rb_insert<u64>(&mut tree, 2000, 2000);
         assert!(tree.leftmost == 2, 2);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 2000);
 
         rb_insert<u64>(&mut tree, 200, 200);
         assert!(tree.leftmost == 6, 6);
