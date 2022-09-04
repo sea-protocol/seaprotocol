@@ -587,6 +587,9 @@ module sea::rbtree {
         loop {
             (parent_key, left_right, is_black) = get_node_key_children_color(&tree.nodes, parent_pos);
             assert!(key != parent_key, E_DUP_KEY);
+            // debug::print(&parent_key);
+            // debug::print(&parent_pos);
+            // debug::print(&left_right);
             if (key < parent_key) {
                 // left
                 let left = get_left_index(left_right);
@@ -614,6 +617,9 @@ module sea::rbtree {
             // the parent is BLACK node, done
             return
         };
+        debug::print(&key);
+        debug::print(&parent_pos);
+        debug::print(&node_pos);
         // rebalance the rbtree
         rb_insert_rebalance<V>(tree, parent_pos, node_pos);
     }
@@ -650,6 +656,11 @@ module sea::rbtree {
         ) = get_node_info_by_pos(&tree.nodes, parent_pos);
 
         while(parent_is_red) {
+            debug::print(&parent_pos);
+            debug::print(&grandad_pos);
+            debug::print(&parent_left_pos);
+            debug::print(&parent_right_pos);
+            debug::print(&parent_is_red);
             // let grandad: &mut RBNode<V> = get_node_mut(&mut tree.nodes, get_parent_index(parent.color_parent));
             let (
                 _,
@@ -658,6 +669,9 @@ module sea::rbtree {
                 grandad_right_pos
             ) = get_node_info_by_pos(&tree.nodes, grandad_pos);
 
+            debug::print(&grandad_parent_pos);
+            debug::print(&grandad_left_pos);
+            debug::print(&grandad_right_pos);
             // parent is the left child of grandad
             if (grandad_left_pos == parent_pos) {
                 let uncle_pos = grandad_right_pos;
@@ -754,40 +768,40 @@ module sea::rbtree {
      *     /   \                       /  \
      *    ly   ry                     lx  ly
      *
-     *  node_pos: node pos -> x
-     *  px_pos: node parent pos
-     *  node_right_pos: node right child pos -> y
+     *  x_pos: node x pos -> x
+     *  px_pos: node x parent node pos
+     *  y_pos: node x right child pos -> y
      */
     fun left_rotate<V>(
         tree: &mut RBTree<V>,
-        node_pos: u64,
+        x_pos: u64,
         px_pos: u64,
-        node_right_pos: u64) {
+        y_pos: u64) {
         let nodes = &mut tree.nodes;
-        let y_left_pos = get_left_index(get_node_mut(nodes, node_right_pos).left_right);
+        let y_left_pos = get_left_index(get_node_mut(nodes, y_pos).left_right);
 
         if (y_left_pos != 0) {
             let ly: &mut RBNode<V> = get_node_mut(nodes, y_left_pos);
-            set_node_parent<V>(ly, node_pos);
+            set_node_parent<V>(ly, x_pos);
         };
-        set_node_parent_by_pos(nodes, node_right_pos, px_pos);
-        if (is_root(tree.root, node_pos)) {
-            tree.root = node_right_pos;
+        set_node_parent_by_pos(nodes, y_pos, px_pos);
+        if (is_root(tree.root, x_pos)) {
+            tree.root = y_pos;
         } else {
             let grandad = get_node_mut(nodes, px_pos);
-            if (is_left_child(grandad.left_right, node_pos)) {
-                set_node_left(grandad, node_right_pos);
+            if (is_left_child(grandad.left_right, x_pos)) {
+                set_node_left(grandad, y_pos);
             } else {
-                set_node_right(grandad, node_right_pos);
+                set_node_right(grandad, y_pos);
             }
         };
-        let y = get_node_mut(nodes, node_right_pos);
-        set_node_left(y, node_pos);
+        let y = get_node_mut(nodes, y_pos);
+        set_node_left(y, x_pos);
 
         // set node parent, node right child
-        let node = get_node_mut(nodes, node_pos);
+        let node = get_node_mut(nodes, x_pos);
         set_node_right(node, y_left_pos);
-        set_node_parent(node, node_right_pos);
+        set_node_parent(node, y_pos);
     }
 
     fun is_root(root: u64,
@@ -991,6 +1005,10 @@ module sea::rbtree {
                 let child_parent_pos = get_parent_index(child.color_parent);
                 let child_is_red = is_red(child.color_parent);
                 assert!(child_pos == node_right_pos, 20);
+                if (pos != child_parent_pos) {
+                    debug::print(&pos);
+                    debug::print(&child_parent_pos);
+                };
                 assert!(pos == child_parent_pos, 21);
                 if (node_is_red) {
                     assert!(child_is_red == false, 22);
@@ -1046,6 +1064,8 @@ module sea::rbtree {
         rb_insert<u64>(&mut tree, 600, 600);
         assert!(tree.root == 3, 3);
         assert!(tree.leftmost == 2, 2);
+        let nodes = validate_tree(&tree);
+        assert!(length(&tree) == nodes, 600);
 
         rb_insert<u64>(&mut tree, 1600, 1600);
         // assert!(tree.root == 1, 1);
