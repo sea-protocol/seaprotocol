@@ -1053,8 +1053,8 @@ module sea::rbtree {
                 let child_is_red = is_red(child.color_parent);
                 assert!(child_pos == node_right_pos, 20);
                 if (pos != child_parent_pos) {
-                    // debug::print(&pos);
-                    // debug::print(&child_parent_pos);
+                    debug::print(&pos);
+                    debug::print(&child_parent_pos);
                 };
                 assert!(pos == child_parent_pos, 21);
                 if (node_is_red) {
@@ -1232,12 +1232,17 @@ module sea::rbtree {
             i = i - 1;
             j  = j + 1;
         };
-        i = 1;
-        while(i <= 5000) {
-            rb_remove_by_key(&mut tree, i);
-            i = i + 1;
-        };
-        assert!(tree.root == 0, 0);
+        // i = 1;
+        // while(i <= 5000) {
+        //     rb_remove_by_key(&mut tree, i);
+        //     if (i % 100 == 0) {
+        //         validate_tree(&tree);
+        //         // assert!(length(&tree) == nodes, (i as u64));
+        //         debug::print(&i);
+        //     };
+        //     i = i + 1;
+        // };
+        // assert!(tree.root == 0, 0);
         tree
     }
 }
