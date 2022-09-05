@@ -1199,9 +1199,9 @@ module sea::rbtree {
         while (i < 5000) {
             rb_insert<u128>(&mut tree, i, i);
             i = i + 1;
-            let nodes = validate_tree(&tree);
-            assert!(length(&tree) == nodes, (i as u64));
             if (i % 100 == 0) {
+                let nodes = validate_tree(&tree);
+                assert!(length(&tree) == nodes, (i as u64));
                 debug::print(&i);
             };
         };
@@ -1223,10 +1223,10 @@ module sea::rbtree {
         let j = 1;
         while (i > 0) {
             rb_insert<u128>(&mut tree, i, i);
-            let nodes = validate_tree(&tree);
-            assert!(length(&tree) == nodes, (i as u64));
             assert!(tree.leftmost == j, (i as u64));
             if (i % 100 == 0) {
+                let nodes = validate_tree(&tree);
+                assert!(length(&tree) == nodes, (i as u64));
                 debug::print(&i);
             };
             i = i - 1;
