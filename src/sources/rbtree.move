@@ -1202,7 +1202,7 @@ module sea::rbtree {
             if (i % 100 == 0) {
                 let nodes = validate_tree(&tree);
                 assert!(length(&tree) == nodes, (i as u64));
-                debug::print(&i);
+                // debug::print(&i);
             };
         };
         
@@ -1227,7 +1227,7 @@ module sea::rbtree {
             if (i % 100 == 0) {
                 let nodes = validate_tree(&tree);
                 assert!(length(&tree) == nodes, (i as u64));
-                debug::print(&i);
+                // debug::print(&i);
             };
             i = i - 1;
             j  = j + 1;
