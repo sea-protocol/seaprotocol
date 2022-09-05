@@ -1115,7 +1115,7 @@ module sea::rbtree {
         let nodes = validate_tree(&tree);
         assert!(length(&tree) == nodes, 600);
 
-        debug::print(&1600);
+        // debug::print(&1600);
         rb_insert<u64>(&mut tree, 1600, 1600);
         // assert!(tree.root == 1, 1);
         // assert!(tree.root == 3, 3);
@@ -1123,7 +1123,7 @@ module sea::rbtree {
         let nodes = validate_tree(&tree);
         assert!(length(&tree) == nodes, 1600);
 
-        debug::print(&2000);
+        // debug::print(&2000);
         rb_insert<u64>(&mut tree, 2000, 2000);
         assert!(tree.leftmost == 2, 2);
         let nodes = validate_tree(&tree);
