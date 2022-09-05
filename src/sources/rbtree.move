@@ -1204,6 +1204,7 @@ module sea::rbtree {
             i = i + 1;
         };
 
+        assert!(tree.root == 0, 0);
         tree
     }
 }
