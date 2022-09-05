@@ -1206,12 +1206,12 @@ module sea::rbtree {
             };
         };
         
-        // i = 0;
-        // while(i < 10000) {
-        //     rb_remove_by_key(&mut tree, i);
-        //     i = i + 1;
-        // };
-        // assert!(tree.root == 0, 0);
+        i = 0;
+        while(i < 5000) {
+            rb_remove_by_key(&mut tree, i);
+            i = i + 1;
+        };
+        assert!(tree.root == 0, 0);
         tree
     }
 
@@ -1232,6 +1232,12 @@ module sea::rbtree {
             i = i - 1;
             j  = j + 1;
         };
+        i = 1;
+        while(i <= 5000) {
+            rb_remove_by_key(&mut tree, i);
+            i = i + 1;
+        };
+        assert!(tree.root == 0, 0);
         tree
     }
 }
