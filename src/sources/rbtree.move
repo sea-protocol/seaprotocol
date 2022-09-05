@@ -1190,7 +1190,6 @@ module sea::rbtree {
         tree
     }
 
-
     #[test]
     fun test_insert_remove(): RBTree<u128> {
         let tree = empty<u128>();
