@@ -923,7 +923,10 @@ module sea::rbtree {
     fun get_node<V>(
         nodes: &vector<RBNode<V>>,
         pos: u64): &RBNode<V> {
-        assert!(pos > 0, 1);
+        if (pos == 0)  {
+            debug::print_stack_trace();
+            assert!(false, 0);
+        };
         vector::borrow<RBNode<V>>(nodes, pos-1)
     }
 
@@ -1193,18 +1196,42 @@ module sea::rbtree {
         let tree = empty<u128>();
 
         let i: u128 = 0;
-        while (i < 100) {
+        while (i < 5000) {
             rb_insert<u128>(&mut tree, i, i);
             i = i + 1;
+            let nodes = validate_tree(&tree);
+            assert!(length(&tree) == nodes, (i as u64));
+            if (i % 100 == 0) {
+                debug::print(&i);
+            };
         };
         
-        i = 0;
-        while(i < 100) {
-            rb_remove_by_key(&mut tree, i);
-            i = i + 1;
-        };
+        // i = 0;
+        // while(i < 10000) {
+        //     rb_remove_by_key(&mut tree, i);
+        //     i = i + 1;
+        // };
+        // assert!(tree.root == 0, 0);
+        tree
+    }
 
-        assert!(tree.root == 0, 0);
+    #[test]
+    fun test_insert_desc(): RBTree<u128> {
+        let tree = empty<u128>();
+
+        let i: u128 = 5000;
+        let j = 1;
+        while (i > 0) {
+            rb_insert<u128>(&mut tree, i, i);
+            let nodes = validate_tree(&tree);
+            assert!(length(&tree) == nodes, (i as u64));
+            assert!(tree.leftmost == j, (i as u64));
+            if (i % 100 == 0) {
+                debug::print(&i);
+            };
+            i = i - 1;
+            j  = j + 1;
+        };
         tree
     }
 }
