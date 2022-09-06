@@ -5,6 +5,10 @@ follow us on twitter:
 
 https://twitter.com/sea_protocol
 
+or join us on discord:
+
+https://discord.gg/fuEkecabwS
+
 ## test
 
 ```
