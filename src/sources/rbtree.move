@@ -322,6 +322,7 @@ module sea::rbtree {
                 rb_delete_rebalance(tree, right_child_pos, parent_pos);
             };
             // todo last vector swap
+            // remove_node_from_vector(nodes, pos);
             return
         };
 
@@ -377,7 +378,7 @@ module sea::rbtree {
             }
         };
         if (last_node_left_pos > 0) {
-            set_node_parent_by_pos(nodes, last_node_right_pos, pos);
+            set_node_parent_by_pos(nodes, last_node_left_pos, pos);
         };
         if (last_node_right_pos > 0) {
             set_node_parent_by_pos(nodes, last_node_right_pos, pos)
@@ -386,8 +387,7 @@ module sea::rbtree {
         let node = get_node_mut(nodes, v_len);
         set_node_position(node, pos);
 
-        let node_del = vector::swap_remove(nodes, pos);
-        node_del
+        vector::swap_remove(nodes, pos)
     }
 
     fun is_black_node<V>(
