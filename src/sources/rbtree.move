@@ -349,6 +349,7 @@ module sea::rbtree {
         if (child_pos != 0 && (!node_is_red)) {
             rb_delete_rebalance(tree, child_pos, parent_pos);
         }
+        // remove_node_from_vector(nodes, pos);
     }
 
     fun remove_node_from_vector<V>(
