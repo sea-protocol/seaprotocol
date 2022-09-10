@@ -21,7 +21,7 @@ module sea::price {
     const E2: u128 = 100;
     const E4: u128 = 10000;
     const E8: u128 = 100000000;
-    const MaxEffectiveDigits: u128 = 1000000;
+    const MAX_EFFECTIVE_DIGITS: u128 = 1000000;
 
     // check the price is valid
     public fun is_valid_price(price: u128): bool {
@@ -44,7 +44,7 @@ module sea::price {
             }
         };
 
-        valid = price < MaxEffectiveDigits;
+        valid = price < MAX_EFFECTIVE_DIGITS;
         valid
     }
 
