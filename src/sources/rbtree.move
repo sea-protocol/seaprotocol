@@ -163,7 +163,6 @@ module sea::rbtree {
             return
         };
 
-        debug::print(&pos);
         rb_remove_node(tree, pos);
     }
 
@@ -275,16 +274,15 @@ module sea::rbtree {
         let parent_pos: u64;
 
         if (pos == tree.leftmost) {
-            if (node_parent_pos > 0) {
-                tree.leftmost = node_parent_pos;
-            } else {
-                // here, the node has only right child
-                if (node_right_pos > 0) {
+            // if it has right pos, set to right pos
+            if (node_right_pos > 0) {
                     let leftest = get_node_least_node(nodes, node_right_pos);
                     tree.leftmost = get_position(leftest.color_parent);
-                } else {
-                    tree.leftmost = 0;
-                }
+            } else if (node_parent_pos > 0) {
+                tree.leftmost = node_parent_pos;
+            } else {
+                // here, the tree is empty
+                tree.leftmost = 0;
             }
         };
 
@@ -337,7 +335,7 @@ module sea::rbtree {
                 rb_delete_rebalance(tree, right_child_pos, parent_pos);
             };
             // last vector swap
-            return remove_node_from_vector(&mut tree.nodes, pos)
+            return remove_node_from_vector(tree, pos)
         };
 
         if (node_left_pos != 0) {
@@ -363,17 +361,21 @@ module sea::rbtree {
         if (child_pos != 0 && (!node_is_red)) {
             rb_delete_rebalance(tree, child_pos, parent_pos);
         };
-        remove_node_from_vector(&mut tree.nodes, pos)
+        remove_node_from_vector(tree, pos)
     }
 
     fun remove_node_from_vector<V: drop>(
-        nodes: &mut vector<RBNode<V>>,
+        tree: &mut RBTree<V>,
         pos: u64): RBNode<V> {
+        let nodes = &mut tree.nodes;
         if (pos == vector::length(nodes)) {
+            let nodes = &mut tree.nodes;
             // the node is last vector item, just pop it
             let node = vector::pop_back(nodes);
             return node
         };
+
+        let nodes = &mut tree.nodes;
         let v_len = vector::length(nodes);
         let (
             _,
@@ -383,11 +385,10 @@ module sea::rbtree {
 
         if (last_node_parent_pos > 0) {
             let parent = get_node_mut(nodes, last_node_parent_pos);
-            let parent_left_child_pos = get_left_index(parent.left_right);
+            let (parent_left_child_pos, parent_right_child_pos) = get_left_right_index(parent.left_right);
             if (parent_left_child_pos == v_len) {
                 set_node_left(parent, pos);
             } else {
-                let parent_right_child_pos = get_left_index(parent.left_right);
                 assert!(parent_right_child_pos == v_len, E_INVALID_CHILD_POS);
                 set_node_right(parent, pos);
             }
@@ -399,10 +400,17 @@ module sea::rbtree {
             set_node_parent_by_pos(nodes, last_node_right_pos, pos)
         };
         // update node position to new postion
-        let node = get_node_mut(nodes, v_len);
-        set_node_position(node, pos);
+        let last_node = get_node_mut(nodes, v_len);
+        set_node_position(last_node, pos);
 
-        vector::swap_remove(nodes, pos)
+        let removed = vector::swap_remove(nodes, pos-1);
+        if (tree.root == v_len) {
+            tree.root = pos;
+        };
+        if (tree.leftmost == v_len) {
+            tree.leftmost = pos;
+        };
+        removed
     }
 
     fun is_black_node<V: drop>(
@@ -980,10 +988,11 @@ module sea::rbtree {
     fun get_node<V: drop>(
         nodes: &vector<RBNode<V>>,
         pos: u64): &RBNode<V> {
-        if (pos == 0)  {
+        if (pos == 0 || pos > vector::length(nodes))  {
             debug::print_stack_trace();
-            assert!(false, 0);
+            assert!(false, pos);
         };
+
         vector::borrow<RBNode<V>>(nodes, pos-1)
     }
 
@@ -1062,11 +1071,11 @@ module sea::rbtree {
         parent: u64,
         left: u64,
         right: u64,
-        val: u128,
+        key: u128,
     }
 
     #[test_only]
-    fun extract_rbnode<V: drop>(node: &RBNode<V>, val: u128): ExtracRBNode {
+    fun extract_rbnode<V: drop>(node: &RBNode<V>): ExtracRBNode {
         let color = node.color_parent >> 63;
         let pos = get_position(node.color_parent);
         let parent = get_parent_index(node.color_parent);
@@ -1074,12 +1083,15 @@ module sea::rbtree {
         let right = get_right_index(node.left_right);
 
         ExtracRBNode{
-            color: color, pos: pos, parent: parent, left: left, right: right, val: val,
+            color: color, pos: pos, parent: parent, left: left, right: right, key: node.key,
         }
     }
 
     #[test_only]
     fun validate_tree<V: drop>(tree: &RBTree<V>, print: bool): u64 {
+        if (tree.root == 0) {
+            return 0
+        };
         assert!(is_empty(tree) == false, 0);
         let pos = tree.leftmost;
         let nodes = 1;
@@ -1089,9 +1101,9 @@ module sea::rbtree {
         if (print) {
             let s: address = @0x111111111;
             debug::print(&s);
-        };
-        if (tree.leftmost == 0) {
-            return 0
+            debug::print(&tree.root);
+            debug::print(&tree.leftmost);
+            debug::print(&length(tree));
         };
         loop {
         // debug::print(&pos);
@@ -1105,7 +1117,7 @@ module sea::rbtree {
             ) = get_node_info(node);
 
             if (print) {
-                let enode = extract_rbnode(node, (get_position(node.color_parent) as u128));
+                let enode = extract_rbnode(node);
                 debug::print(&enode);
             };
 
@@ -1149,6 +1161,10 @@ module sea::rbtree {
             };
             // debug::print(&pos);
             nodes = nodes + 1;
+        };
+        if (print) {
+            let s: address = @0x1111111110000000000000000000000000000000000000000000000000000000;
+            debug::print(&s);
         };
         nodes
     }
@@ -1328,7 +1344,7 @@ module sea::rbtree {
     fun test_remove(): RBTree<u128> {
         let tree = empty<u128>();
         let i: u128 = 0;
-        while (i < 500) {
+        while (i < 1000) {
             rb_insert<u128>(&mut tree, i, i);
             i = i + 1;
             if (i % 100 == 0) {
@@ -1337,17 +1353,27 @@ module sea::rbtree {
                 // debug::print(&i);
             };
         };
-        validate_tree(&tree, true);
-        let hr = @0x22222222222;
-        debug::print(&hr);
+        validate_tree(&tree, false);
+        // let hr = @0x22222222222;
+        // debug::print(&hr);
 
         i = 0;
-        while(i < 500) {
+        while(i < 1000) {
             rb_remove_by_key(&mut tree, i);
-            validate_tree(&tree, true);
+            if (i % 1 == 0) {
+                let nodes = validate_tree(&tree, false);
+                assert!(nodes == length(&tree), nodes);
+                // if (length(&tree) != nodes) {
+                //     debug::print(&length(&tree));
+                //     debug::print(&nodes);
+                //     // debug::print(&i);
+                //     // assert!(false, (i as u64));
+                // }
+            };
             i = i + 1;
         };
         assert!(tree.root == 0, 0);
+        assert!(length(&tree) == 0, 0);
         tree
     }
 }
