@@ -45,6 +45,8 @@ module sea::rbtree {
     /// all vector index + 1
     /// nodes should less than 0x7fffffff
     struct RBTree<V: drop> has store {
+        /// the less is on left side
+        left_is_less: bool,
         /// Root node index
         root: u64,
         /// the left most node index
@@ -76,8 +78,9 @@ module sea::rbtree {
     const E_INVALID_CHILD_POS: u64 = 4;
 
     /// Return an empty tree
-    public fun empty<V: drop>(): RBTree<V> {
+    public fun empty<V: drop>(left_is_less: bool): RBTree<V> {
         RBTree{
+            left_is_less,
             root: 0,
             leftmost: 0,
             nodes: vector::empty<RBNode<V>>()
@@ -86,10 +89,12 @@ module sea::rbtree {
 
     /// Return a tree with one node having `key` and `value`
     public fun singleton<V: drop>(
+        left_is_less: bool,
         key: u128,
         value: V
     ): RBTree<V> {
         RBTree{
+            left_is_less: left_is_less,
             root: 1,
             leftmost: 1,
              // the root node is BLACK node
@@ -144,10 +149,18 @@ module sea::rbtree {
             if (key == node.key) {
                 return idx
             };
-            if (key < node.key) {
-                idx = get_left_index(node.left_right);
+            if (tree.left_is_less) {
+                if (key < node.key) {
+                    idx = get_left_index(node.left_right);
+                } else {
+                    idx = get_right_index(node.left_right);
+                };
             } else {
-                idx = get_right_index(node.left_right);
+                if (key > node.key) {
+                    idx = get_left_index(node.left_right);
+                } else {
+                    idx = get_right_index(node.left_right);
+                };
             };
             if (idx == 0) {
                 return 0
@@ -674,7 +687,8 @@ module sea::rbtree {
             // debug::print(&parent_key);
             // debug::print(&parent_pos);
             // debug::print(&left_right);
-            if (key < parent_key) {
+            if ( (tree.left_is_less && key < parent_key) ||
+                (tree.left_is_less == false && key > parent_key)) {
                 // left
                 let left = get_left_index(left_right);
                 if (left == 0) {
@@ -1136,7 +1150,11 @@ module sea::rbtree {
                 if (node_is_red) {
                     assert!(child_is_red == false, 12);
                 };
-                assert!(child.key < node.key, 13);
+                if (tree.left_is_less) {
+                    assert!(child.key < node.key, 13);
+                } else {
+                    assert!(child.key > node.key, 14);
+                }
             };
             if (node_right_pos > 0) {
                 let child = get_node(&tree.nodes, node_right_pos);
@@ -1152,7 +1170,11 @@ module sea::rbtree {
                 if (node_is_red) {
                     assert!(child_is_red == false, 22);
                 };
-                assert!(child.key > node.key, 23);
+                if (tree.left_is_less) {
+                    assert!(child.key > node.key, 23);
+                } else {
+                    assert!(child.key < node.key, 24);
+                }
             };
 
             pos = next_pos(tree, pos);
@@ -1172,14 +1194,14 @@ module sea::rbtree {
     // Tests ==================================================================
     #[test]
     fun test_is_empty(): RBTree<u64> {
-        let tree = empty<u64>();
+        let tree = empty<u64>(true);
         assert!(is_empty(&tree), 1);
         tree
     }
 
     #[test]
     fun test_insert_empty(): RBTree<u64> {
-        let tree = empty<u64>();
+        let tree = empty<u64>(true);
         rb_insert<u64>(&mut tree, 1000, 1000);
         assert!(tree.root == 1, 1);
         assert!(tree.leftmost == 1, 1);
@@ -1196,7 +1218,7 @@ module sea::rbtree {
 
     #[test]
     fun test_insert(): RBTree<u64> {
-        let tree = empty<u64>();
+        let tree = empty<u64>(true);
         rb_insert<u64>(&mut tree, 1000, 1000);
         assert!(tree.root == 1, 1);
         assert!(tree.leftmost == 1, 1);
@@ -1288,7 +1310,7 @@ module sea::rbtree {
 
     #[test]
     fun test_insert_asc(): RBTree<u128> {
-        let tree = empty<u128>();
+        let tree = empty<u128>(true);
 
         let i: u128 = 0;
         while (i < 50) {
@@ -1312,7 +1334,7 @@ module sea::rbtree {
 
     #[test]
     fun test_insert_desc(): RBTree<u128> {
-        let tree = empty<u128>();
+        let tree = empty<u128>(true);
 
         let i: u128 = 50;
         let j = 1;
@@ -1340,11 +1362,74 @@ module sea::rbtree {
         // assert!(tree.root == 0, 0);
         tree
     }
+
+    #[test]
+    fun test_insert_reverse_asc(): RBTree<u128> {
+        let tree = empty<u128>(false);
+        let max: u128 = 150;
+        let i: u128 = 0;
+        // let j = 1;
+        while (i < max) {
+            rb_insert<u128>(&mut tree, i, i);
+            assert!(tree.leftmost == ((i+1) as u64), (i as u64));
+            if (i % 1 == 0) {
+                let nodes = validate_tree(&tree, false);
+                assert!(length(&tree) == nodes, (i as u64));
+                // debug::print(&i);
+            };
+            i = i + 1;
+            // j  = j + 1;
+        };
+        i = 0;
+        while(i < max) {
+            rb_remove_by_key(&mut tree, i);
+            if (i % 1 == 0) {
+                let nodes = validate_tree(&tree, false);
+                assert!(length(&tree) == nodes, (i as u64));
+                // debug::print(&i);
+            };
+            i = i + 1;
+        };
+        assert!(tree.root == 0, 0);
+        tree
+    }
+
+    #[test]
+    fun test_insert_reverse_desc(): RBTree<u128> {
+        let tree = empty<u128>(false);
+        let max: u128 = 150;
+        let i: u128 = max;
+        // let j = 1;
+        while (i > 0) {
+            rb_insert<u128>(&mut tree, i, i);
+            assert!(tree.leftmost == 1, (i as u64));
+            if (i % 1 == 0) {
+                let nodes = validate_tree(&tree, false);
+                assert!(length(&tree) == nodes, (i as u64));
+                // debug::print(&i);
+            };
+            i = i - 1;
+            // j  = j + 1;
+        };
+        i = max;
+        while(i > 0) {
+            rb_remove_by_key(&mut tree, i);
+            if (i % 1 == 0) {
+                let nodes = validate_tree(&tree, false);
+                assert!(length(&tree) == nodes, (i as u64));
+                // debug::print(&i);
+            };
+            i = i - 1;
+        };
+        assert!(tree.root == 0, 0);
+        tree
+    }
+
     #[test]
     fun test_remove(): RBTree<u128> {
-        let tree = empty<u128>();
+        let tree = empty<u128>(true);
         let i: u128 = 0;
-        while (i < 1000) {
+        while (i < 100) {
             rb_insert<u128>(&mut tree, i, i);
             i = i + 1;
             if (i % 100 == 0) {
@@ -1358,9 +1443,9 @@ module sea::rbtree {
         // debug::print(&hr);
 
         i = 0;
-        while(i < 1000) {
+        while(i < 100) {
             rb_remove_by_key(&mut tree, i);
-            if (i % 1 == 0) {
+            if (i % 10 == 0) {
                 let nodes = validate_tree(&tree, false);
                 assert!(nodes == length(&tree), nodes);
                 // if (length(&tree) != nodes) {
