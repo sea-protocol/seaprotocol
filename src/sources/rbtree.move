@@ -114,6 +114,22 @@ module sea::rbtree {
         vector::length<RBNode<V>>(&tree.nodes)
     }
 
+    public fun borrow_leftmost_mut<V>(tree: &mut RBTree<V>): &mut RBNode<V> {
+        let pos = tree.leftmost;
+        vector::borrow_mut<RBNode<V>>(&mut tree.nodes, pos-1)
+    }
+
+    public fun borrow_leftmost_val_mut<V>(tree: &mut RBTree<V>): &mut V {
+        let pos = tree.leftmost;
+        let node = vector::borrow_mut<RBNode<V>>(&mut tree.nodes, pos-1);
+        &mut node.value
+    }
+
+    public fun pop_leftmost<V>(tree: &mut RBTree<V>): RBNode<V> {
+        let pos = tree.leftmost;
+        rb_remove_by_pos(tree, pos)
+    }
+
     /// insert a new node with key & value
     public fun rb_insert<V>(
         tree: &mut RBTree<V>,
