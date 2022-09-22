@@ -27,6 +27,8 @@ module sea::rbtree {
     use std::vector;
     use std::debug;
 
+    // Structs ====================================================
+    
     /// A rbtree node
     struct RBNode<V> has store, drop {
         // color is the first 1 bit
@@ -78,6 +80,8 @@ module sea::rbtree {
     const E_INVALID_CHILD_POS: u64 = 4;
     const E_NOT_EXIST: u64         = 5;
     const E_REMOVE_EMPTY_TREE: u64 = 6;
+
+    // Public functions ====================================================
 
     /// Return an empty tree
     public fun empty<V>(left_is_less: bool): RBTree<V> {
