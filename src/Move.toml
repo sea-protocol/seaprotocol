@@ -4,6 +4,7 @@ version = "0.0.6" # Per SemVer
 
 [addresses]
 sea = "0x393a63f47da7a757a252cb44fbab2afe602efe9d88e8ae84aac7db4949a9beb0"
+sea_spot = "0x393a63f47da7a757a252cb44fbab2afe602efe9d88e8ae84aac7db4949a9beb0"
 
 # Mock users for unit tests
 user = "0x12"
