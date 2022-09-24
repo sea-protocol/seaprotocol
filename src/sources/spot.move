@@ -118,9 +118,9 @@ module sea::spot {
     ) {
         let completed = false;
         while (!rbtree::is_empty(orderbook)) {
-            let step = rbtree::borrow_leftmost_val_mut(orderbook);
-            if (step.qty <= taker.qty) {
-                // remove this step from orderbook
+            let order = rbtree::borrow_leftmost_val_mut(orderbook);
+            if (order.qty <= taker.qty) {
+                // remove this order from orderbook
             } else {
                 completed = true;
                 // if the last maker order cannot match anymore
