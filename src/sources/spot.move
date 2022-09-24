@@ -26,10 +26,12 @@ module sea::spot {
         // the grid id or 0 if is not grid
         grid: u64,
         // user address
-        user: address
+        user: address,
+        // escrow account id
+        account_id: u64
     }
 
-    struct Pair<phantom BaseType> has store {
+    struct Pair<phantom BaseType, phantom QuoteType> has store {
         fee: u64,
         pair_id: u64,
         quote_id: u64,
@@ -38,6 +40,7 @@ module sea::spot {
         base_precision: u64,  // pow(10, quote_decimals) / pow(10, )
         quote_precision: u64,  // pow(10, quote_decimals) / pow(10, )
         base: Coin<BaseType>,
+        quote: Coin<BaseType>,
         asks: RBTree<OrderEntity>,
         bids: RBTree<OrderEntity>,
     }
@@ -49,10 +52,11 @@ module sea::spot {
     }
 
     struct SpotMarket<phantom BaseType, phantom QuoteType> has key {
+        fee: u64,
         n_pair: u64,
         n_quote: u64,
         quotes: Table<u64, QuoteConfig<QuoteType>>,
-        pairs: Table<u64, Pair<BaseType>>
+        pairs: Table<u64, Pair<BaseType, QuoteType>>
     }
 
     // Constants ====================================================
@@ -64,10 +68,11 @@ module sea::spot {
     // Public functions ====================================================
 
     /// init spot market
-    public fun init_spot_market<BaseType, QuoteType>(account: &signer) {
+    public fun init_spot_market<BaseType, QuoteType>(account: &signer, fee: u64) {
         assert!(address_of(account) == @sea, E_NO_AUTH);
         assert!(!exists<SpotMarket<BaseType, QuoteType>>(@sea), E_SPOT_MARKET_EXISTS);
         let spot_market = SpotMarket{
+            fee: fee,
             n_pair: 0,
             n_quote: 0,
             quotes: table::new<u64, QuoteConfig<QuoteType>>(),
@@ -99,14 +104,16 @@ module sea::spot {
         // assert!(table::contains(spot_market_ref_mut, ), );
     }
 
-    // public fun register_pair<BaseType, QuoteType>(
-    //     account: &signer,
-    //     base: Coin<BaseType>,
-    //     quote: Coin<QuoteType>,
-    //     quote_id: u64,
-    // ) {
-    //     // move_to();
-    // }
+    public fun register_pair<BaseType, QuoteType>(
+        account: &signer,
+        base: Coin<BaseType>,
+        quote: Coin<QuoteType>,
+        price_coefficient: u64
+    ) acquires SpotMarket {
+        let spot_market_ref_mut = borrow_global_mut<SpotMarket<BaseType, QuoteType>>(@sea);
+        assert!(!exists());
+        // move_to();
+    }
 
     /// match buy order, taker is buyer, maker is seller
     /// 
