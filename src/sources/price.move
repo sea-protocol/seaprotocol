@@ -22,6 +22,21 @@ module sea::price {
     const E4: u128 = 10000;
     const E8: u128 = 100000000;
     const MAX_EFFECTIVE_DIGITS: u128 = 1000000;
+    // 64 bit
+    const ORDER_ID_MASK: u128 = 0xffffffffffffffff;
+
+    public fun get_price_order_id(v: u128): (u64, u64) {
+        (((v >> 64) as u64), ((v & ORDER_ID_MASK) as u64))
+    }
+
+    public fun calc_price_ratio(
+        base_scale: u64,
+        quote_scale: u64,
+        price_coefficient: u64,
+    ): (u64, bool) {
+        // todo
+        (1, true)
+    }
 
     // check the price is valid
     public fun is_valid_price(price: u128): bool {

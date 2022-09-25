@@ -123,13 +123,13 @@ module sea::rbtree {
         vector::borrow_mut<RBNode<V>>(&mut tree.nodes, pos-1)
     }
 
-    public fun borrow_leftmost_val_mut<V>(tree: &mut RBTree<V>): &mut V {
+    public fun borrow_leftmost_keyval_mut<V>(tree: &mut RBTree<V>): (u64, u128, &mut V) {
         let pos = tree.leftmost;
         let node = vector::borrow_mut<RBNode<V>>(&mut tree.nodes, pos-1);
-        &mut node.value
+        (get_position(node.color_parent), node.key, &mut node.value)
     }
 
-    public fun pop_leftmost<V>(tree: &mut RBTree<V>): RBNode<V> {
+    public fun pop_leftmost<V>(tree: &mut RBTree<V>): (u128, V) {
         let pos = tree.leftmost;
         rb_remove_by_pos(tree, pos)
     }
@@ -204,12 +204,17 @@ module sea::rbtree {
 
     public fun rb_remove_by_pos<V>(
         tree: &mut RBTree<V>,
-        pos: u64): RBNode<V> {
+        pos: u64): (u128, V) {
         // if (is_empty(tree)) {
         //     return
         // };
         assert!(!is_empty(tree), E_REMOVE_EMPTY_TREE);
-        rb_remove_node(tree, pos)
+        let RBNode<V> {
+            color_parent: _,
+            left_right: _,
+            key: key,
+            value: v } = rb_remove_node(tree, pos);
+        (key, v)
     }
 
     // Private functions ====================================================
