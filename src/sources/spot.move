@@ -129,7 +129,7 @@ module sea::spot {
 
     // register pair, quote should be one of the egliable quote
     public fun register_pair<BaseType, QuoteType, FeeRatio>(
-        account: &signer,
+        _owner: &signer,
         base: Coin<BaseType>,
         quote: Coin<QuoteType>,
         price_coefficient: u64
@@ -170,7 +170,6 @@ module sea::spot {
     /// match buy order, taker is buyer, maker is seller
     /// 
     public fun match(
-        pair_id: u64,
         side: bool,
         orderbook: &mut RBTree<OrderEntity>,
         taker: &mut OrderEntity
@@ -202,11 +201,11 @@ module sea::spot {
             };
 
             let match_qty = taker_order.qty;
+            let remove_order = false;
             if (order.qty <= taker_order.qty) {
                 match_qty = order.qty;
                 // remove this order from orderbook
-                // let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
-                // let OrderEntity {qty: _, grid: _, account_id: _} = pop_order;
+                remove_order = true;
             } else {
                 completed = true;
                 // if the last maker order cannot match anymore
@@ -223,6 +222,10 @@ module sea::spot {
                 order.account_id,
                 match_qty,
                 quote_vol);
+            if (remove_order) {
+                let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
+                let OrderEntity {qty: _, grid: _, account_id: _} = pop_order;
+            };
             if (completed) {
                 break
             }
