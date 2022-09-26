@@ -17,11 +17,11 @@ module sea::fee {
     /// get fee ratio by type
     public fun get_fee_ratio<F>(): u64 {
         if (type_info::type_of<F>() == type_info::type_of<FeeRatio200>()) {
-            return 200;
+            return 200
         } else if (type_info::type_of<F>() == type_info::type_of<FeeRatio500>()) {
-            return 500;
+            return 500
         } else if (type_info::type_of<F>() == type_info::type_of<FeeRatio1000>()) {
-            return 1000;
+            return 1000
         };
     
         assert!(false, E_NO_FEE_RATIO);

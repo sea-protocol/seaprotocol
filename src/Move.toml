@@ -14,8 +14,8 @@ user_1 = "0x56"
 user_2 = "0x78"
 user_3 = "0x90"
 
-# [dependencies.SeaInit]
-# local = "./sea_init/"
+[dependencies.SeaInit]
+local = "./sea_init/"
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"

@@ -195,18 +195,18 @@ module sea::spot {
 
         while (!rbtree::is_empty(orderbook)) {
             let (pos, key, order) = rbtree::borrow_leftmost_keyval_mut(orderbook);
-            let (maker_price, maker_order_id) = price::get_price_order_id(key);
+            let (maker_price, _) = price::get_price_order_id(key);
             if ((taker_side == BUY && price >= maker_price) ||
                  (taker_side == SELL && price <=  maker_price)) {
-                break;
+                break
             };
 
             let match_qty = taker_order.qty;
             if (order.qty <= taker_order.qty) {
                 match_qty = order.qty;
                 // remove this order from orderbook
-                let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
-                let OrderEntity {qty: _, grid: _, account_id: _} = pop_order;
+                // let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
+                // let OrderEntity {qty: _, grid: _, account_id: _} = pop_order;
             } else {
                 completed = true;
                 // if the last maker order cannot match anymore
@@ -249,12 +249,12 @@ module sea::spot {
     // increase maker escrow
     fun swap_internal(
         taker_side: u8,
-        base_id: u64,
-        quote_id: u64,
-        taker: u64,
-        maker: u64,
-        base_qty: u64,
-        quote_vol: u64
+        _base_id: u64,
+        _quote_id: u64,
+        _taker: u64,
+        _maker: u64,
+        _base_qty: u64,
+        _quote_vol: u64
     ) {
         if (taker_side == BUY) {
             // taker got base coin
@@ -266,7 +266,7 @@ module sea::spot {
     }
 
     fun swap_coin(
-        step: &mut OrderEntity,
+        _step: &mut OrderEntity,
         ) {
 
     }

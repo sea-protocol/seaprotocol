@@ -30,9 +30,9 @@ module sea::price {
     }
 
     public fun calc_price_ratio(
-        base_scale: u64,
-        quote_scale: u64,
-        price_coefficient: u64,
+        _base_scale: u64,
+        _quote_scale: u64,
+        _price_coefficient: u64,
     ): (u64, bool) {
         // todo
         (1, true)

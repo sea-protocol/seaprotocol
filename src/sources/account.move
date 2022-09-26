@@ -32,7 +32,7 @@ module sea::account {
         ) acquires SpotAccounts {
         assert!(exists<SpotAccounts>(@sea), E_ACCOUNT_NOT_INIT);
         let spot_accounts = borrow_global_mut<SpotAccounts>(@sea);
-        let addr = address_of(account);
+        // let addr = address_of(account);
         spot_accounts.n_account = spot_accounts.n_account + 1;
         let account_id = spot_accounts.n_account;
 
