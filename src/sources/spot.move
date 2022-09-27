@@ -10,10 +10,11 @@
 /// spot pairs
 /// 
 module sea::spot {
-    use std::signer::{Self, address_of};
+    use std::signer::address_of;
     // use std::vector;
     use aptos_framework::coin::{Self, Coin};
-    // use aptos_std::table::{Self, Table};
+    use aptos_std::table::{Self, Table};
+    use aptos_std::type_info::{Self, TypeInfo};
     use aptos_framework::account::{Self, SignerCapability};
     use sea::rbtree::{Self, RBTree};
     use sea::price;
@@ -39,8 +40,8 @@ module sea::spot {
 
     struct Pair<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
         fee: u64,
-        // pair_id: u64,
-        // quote_id: u64,
+        base_id: u64,
+        quote_id: u64,
         lot_size: u64,
         // multiply: bool,         // price_ratio is multiply or divided
         price_ratio: u64,       // price_coefficient*pow(10, base_precision-quote_precision)
@@ -54,9 +55,10 @@ module sea::spot {
     }
 
     struct QuoteConfig<phantom QuoteType> has key {
-        quote: Coin<QuoteType>,
+        quote_id: u64,
         tick_size: u64,
         min_notional: u64,
+        quote: Coin<QuoteType>,
     }
 
     // struct SpotMarket<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
@@ -66,6 +68,12 @@ module sea::spot {
     //     quotes: Table<u64, QuoteConfig<QuoteType>>,
     //     pairs: Table<u64, Pair<BaseType, QuoteType, FeeRatio>>
     // }
+    struct SpotCoins has key {
+        n_coin: u64,
+        n_quote: u64,
+        coin_map: Table<TypeInfo, u64>,
+        quote_map: Table<TypeInfo, u64>,
+    }
 
     /// Stores resource account signer capability under Liquidswap account.
     struct SpotAccountCapability has key { signer_cap: SignerCapability }
@@ -83,13 +91,21 @@ module sea::spot {
     const E_VOL_EXCEED_MAX_U128: u64 = 6;
     const E_PAIR_EXISTS:         u64 = 7;
     const E_PAIR_PRICE_INVALID:  u64 = 8;
+    const E_NOT_QUOTE_COIN:      u64 = 9;
 
     // Public functions ====================================================
 
     public entry fun initialize(sea_admin: &signer) {
-        assert!(signer::address_of(sea_admin) == @sea, E_NO_AUTH);
+        assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
         let signer_cap = spot_account::retrieve_signer_cap(sea_admin);
         move_to(sea_admin, SpotAccountCapability { signer_cap });
+
+        move_to(sea_admin, SpotCoins {
+            n_coin: 0,
+            n_quote: 0,
+            coin_map: table::new<TypeInfo, u64>(),
+            quote_map: table::new<TypeInfo, u64>()
+        });
     }
 
     /// init spot market
@@ -103,7 +119,6 @@ module sea::spot {
     //         quotes: table::new<u64, QuoteConfig<QuoteType>>(),
     //         pairs: table::new<u64, Pair<BaseType, QuoteType, FeeRatio>>(),
     //     };
-
     //     move_to<SpotMarket<BaseType, QuoteType, FeeRatio>>(account, spot_market);
     // }
 
@@ -113,16 +128,16 @@ module sea::spot {
         quote: Coin<QuoteType>,
         tick_size: u64,
         min_notional: u64,
-    ) acquires SpotAccountCapability {
+    ) acquires SpotCoins {
         assert!(address_of(account) == @sea, E_NO_AUTH);
-        assert!(!exists<QuoteConfig<QuoteType>>(@sea_spot), E_QUOTE_CONFIG_EXISTS);
-        let spot_cap = borrow_global<SpotAccountCapability>(@sea);
-        let pair_account = account::create_signer_with_capability(&spot_cap.signer_cap);
+        assert!(!exists<QuoteConfig<QuoteType>>(@sea), E_QUOTE_CONFIG_EXISTS);
+        let quote_id = get_or_register_coin_id(type_info::type_of<Coin<QuoteType>>(), true);
 
-        move_to(&pair_account, QuoteConfig{
-            quote: quote,
+        move_to(account, QuoteConfig{
+            quote_id: quote_id,
             tick_size: tick_size,
-            min_notional: min_notional
+            min_notional: min_notional,
+            quote: quote,
         })
         // todo event
     }
@@ -133,12 +148,14 @@ module sea::spot {
         base: Coin<BaseType>,
         quote: Coin<QuoteType>,
         price_coefficient: u64
-    ) acquires SpotAccountCapability {
+    ) acquires SpotCoins, SpotAccountCapability {
         utils::assert_is_coin<BaseType>();
         utils::assert_is_coin<QuoteType>();
-        // todo assert QuoteType is one of QuoteConfig
+        assert!(is_quote_coin<QuoteType>(), E_NOT_QUOTE_COIN);
         assert!(!exists<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot), E_PAIR_EXISTS);
 
+        let base_id = get_or_register_coin_id(type_info::type_of<BaseType>(), false);
+        let quote_id = get_or_register_coin_id(type_info::type_of<QuoteType>(), true);
         let spot_cap = borrow_global<SpotAccountCapability>(@sea);
         let pair_account = account::create_signer_with_capability(&spot_cap.signer_cap);
         let fee = fee::get_fee_ratio<FeeRatio>();
@@ -153,6 +170,8 @@ module sea::spot {
         assert!(ok, E_PAIR_PRICE_INVALID);
         let pair: Pair<BaseType, QuoteType, FeeRatio> = Pair{
             fee: fee,
+            base_id: base_id,
+            quote_id: quote_id,
             lot_size: 0,
             price_ratio: ratio,       // price_coefficient*pow(10, base_precision-quote_precision)
             price_coefficient: price_coefficient, // price coefficient, from 10^1 to 10^12
@@ -177,8 +196,30 @@ module sea::spot {
 
     }
 
+    public fun is_quote_coin<CoinType>(): bool acquires SpotCoins {
+        let info = type_info::type_of<CoinType>();
+        let coinlist = borrow_global<SpotCoins>(@sea);
+        table::contains<TypeInfo, u64>(&coinlist.quote_map, info)
+    }
 
     // Private functions ====================================================
+
+    fun get_or_register_coin_id(info: TypeInfo, is_quote: bool): u64 acquires SpotCoins {
+        let coinlist = borrow_global_mut<SpotCoins>(@sea);
+
+        if (table::contains<TypeInfo, u64>(&coinlist.coin_map, info)) {
+            let cid = table::borrow(&coinlist.coin_map, info);
+            return *cid
+        };
+        coinlist.n_coin = coinlist.n_coin + 1;
+        let id = coinlist.n_coin;
+        if (is_quote) {
+            coinlist.n_quote = coinlist.n_quote + 1;
+            table::add<TypeInfo, u64>(&mut coinlist.quote_map, info, id);
+        };
+        table::add<TypeInfo, u64>(&mut coinlist.coin_map, info, id);
+        id
+    }
 
     fun match_internal(
         taker_side: u8,
