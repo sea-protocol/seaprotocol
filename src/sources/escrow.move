@@ -196,6 +196,26 @@ module sea::escrow {
         account::create_signer_with_capability(&spot_cap.signer_cap)
     }
 
+    // available -> frozen
+    // available -= amount
+    // frozen += amount
+    public(friend) fun transfer_to_frozen<CoinType>(
+        addr: address,
+        amount: u64,
+    ) acquires AccountEscrow {
+        let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
+        // assert!();
+        coin::merge(&mut escrow_ref.frozen, coin::extract(&mut escrow_ref.available, amount))
+    }
+
+    public(friend) fun transfer_from_frozen<CoinType>(
+        addr: address,
+        amount: u64,
+    ) acquires AccountEscrow {
+        let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
+        coin::merge(&mut escrow_ref.available, coin::extract(&mut escrow_ref.frozen, amount))
+    }
+
     // increase the escrow account coin
     public(friend) fun incr_escrow_coin<CoinType>(
         addr: address,

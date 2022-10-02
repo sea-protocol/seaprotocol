@@ -57,7 +57,6 @@ module sea::spot {
         quote_id: u64,
         pair_id: u64,
         lot_size: u64,
-        // multiply: bool,         // price_ratio is multiply or divided
         price_ratio: u64,       // price_coefficient*pow(10, base_precision-quote_precision)
         price_coefficient: u64, // price coefficient, from 10^1 to 10^12
         last_price: u64,        // last trade price
@@ -89,6 +88,7 @@ module sea::spot {
     //     quotes: Table<u64, QuoteConfig<QuoteType>>,
     //     pairs: Table<u64, Pair<BaseType, QuoteType, FeeRatio>>
     // }
+    //
     // struct SpotCoins has key {
     //     n_coin: u64,
     //     n_quote: u64,
@@ -218,7 +218,6 @@ module sea::spot {
         // todo events
     }
 
-
     // place post only order
     public entry fun place_postonly_order<BaseType, QuoteType, FeeRatio>(
         account: &signer,
@@ -233,21 +232,21 @@ module sea::spot {
         if (side == SELL)  {
             let bids = &mut pair.bids;
             let bid0 = get_best_price(bids);
-            assert!(has_enough_asset<BaseType>(account_addr, qty, from_escrow), E_BASE_NOT_ENOUGH);
+            // assert!(has_enough_asset<BaseType>(account_addr, qty, from_escrow), E_BASE_NOT_ENOUGH);
             assert!(price >= bid0, E_PRICE_TOO_LOW);
         } else {
             let asks = &mut pair.asks;
             let ask0 = get_best_price(asks);
             assert!(price <= ask0, E_PRICE_TOO_HIGH);
-            let vol = calc_quote_vol_for_buy(qty, price, pair.price_ratio);
-            assert!(has_enough_asset<QuoteType>(account_addr, vol, from_escrow), E_BASE_NOT_ENOUGH);
+            // let vol = calc_quote_vol_for_buy(qty, price, pair.price_ratio);
+            // assert!(has_enough_asset<QuoteType>(account_addr, vol, from_escrow), E_BASE_NOT_ENOUGH);
         };
         let order = &mut OrderEntity{
             qty: qty,
             grid_id: 0,
-            account_id: escrow::get_or_register_account_id(address_of(account)), // lazy set. if the order is to be insert into orderbook, we will set it
+            account_id: escrow::get_or_register_account_id(account_addr),
         };
-        place_order(account, side, price, pair, order)
+        place_order(account, account_addr, side, from_escrow, price, pair, order)
     }
 
     public entry fun place_limit_order<BaseType, QuoteType, FeeRatio>(
@@ -372,23 +371,33 @@ module sea::spot {
             // place order to orderbook
             let taker_account_id = escrow::get_or_register_account_id(taker_addr);
             order.account_id = taker_account_id;
-            place_order(taker, opts.side, price, pair, order);
+            place_order(taker, taker_addr, opts.side, opts.from_escrow, price, pair, order);
         }
     }
 
     fun place_order<BaseType, QuoteType, FeeRatio>(
         account: &signer,
+        addr: address,
         side: u8,
+        from_escrow: bool,
         price: u64,
         pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
         order: &mut OrderEntity
     ) {
         // frozen
         if (side == SELL) {
-            escrow::deposit<BaseType>(account, order.qty, true);
+            if (from_escrow) {
+                escrow::transfer_to_frozen<BaseType>(addr, order.qty);
+            } else {
+                escrow::deposit<BaseType>(account, order.qty, true);
+            }
         } else {
             let vol = calc_quote_vol_for_buy(order.qty, price, pair.price_ratio);
-            escrow::deposit<QuoteType>(account, vol, true);
+            if (from_escrow) {
+                escrow::transfer_to_frozen<QuoteType>(addr, vol);
+            } else {
+                escrow::deposit<QuoteType>(account, vol, true);
+            }
         };
 
         let order_id = generate_order_id(pair);
