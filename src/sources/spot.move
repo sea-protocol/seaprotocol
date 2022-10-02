@@ -34,10 +34,11 @@ module sea::spot {
         post_only: bool,
         ioc: bool,
         fok: bool,
+        is_market: bool,
     }
 
     /// OrderEntity order entity. price, pair_id is on OrderBook
-    struct OrderEntity has copy, store {
+    struct OrderEntity has copy, drop, store {
         // base coin amount
         // we use qty to indicate base amount, vol to indicate quote amount
         qty: u64,
@@ -115,6 +116,10 @@ module sea::spot {
     const E_PAIR_PRICE_INVALID:  u64 = 8;
     const E_NOT_QUOTE_COIN:      u64 = 9;
     const E_EXCEED_PAIR_COUNT:   u64 = 10;
+    const E_BASE_NOT_ENOUGH:     u64 = 11;
+    const E_QUOTE_NOT_ENOUGH:    u64 = 12;
+    const E_PRICE_TOO_LOW:       u64 = 13;
+    const E_PRICE_TOO_HIGH:      u64 = 14;
 
     // Public functions ====================================================
 
@@ -213,37 +218,144 @@ module sea::spot {
         // todo events
     }
 
+
+    // place post only order
+    public entry fun place_postonly_order<BaseType, QuoteType, FeeRatio>(
+        account: &signer,
+        side: u8,
+        price: u64,
+        qty: u64,
+        from_escrow: bool,
+    ) acquires Pair {
+        let account_addr = address_of(account);
+        let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+
+        if (side == SELL)  {
+            let bids = &mut pair.bids;
+            let bid0 = get_best_price(bids);
+            assert!(has_enough_asset<BaseType>(account_addr, qty, from_escrow), E_BASE_NOT_ENOUGH);
+            assert!(price >= bid0, E_PRICE_TOO_LOW);
+        } else {
+            let asks = &mut pair.asks;
+            let ask0 = get_best_price(asks);
+            assert!(price <= ask0, E_PRICE_TOO_HIGH);
+            let vol = calc_quote_vol_for_buy(qty, price, pair.price_ratio);
+            assert!(has_enough_asset<QuoteType>(account_addr, vol, from_escrow), E_BASE_NOT_ENOUGH);
+        };
+        let order = &mut OrderEntity{
+            qty: qty,
+            grid_id: 0,
+            account_id: escrow::get_or_register_account_id(address_of(account)), // lazy set. if the order is to be insert into orderbook, we will set it
+        };
+        place_order(account, side, price, pair, order)
+    }
+
+    public entry fun place_limit_order<BaseType, QuoteType, FeeRatio>(
+        account: &signer,
+        side: u8,
+        price: u64,
+        qty: u64,
+        ioc: bool,
+        fok: bool,
+        from_escrow: bool,
+        to_escrow: bool,
+    ) acquires Pair {
+        if (fok) {
+            // TODO check this order can be filled
+        };
+        let taker_addr = address_of(account);
+        let opts = &PlaceOrderOpts {
+            addr: taker_addr,
+            side: side,
+            from_escrow: from_escrow,
+            to_escrow: to_escrow,
+            post_only: false,
+            ioc: ioc,
+            fok: fok,
+            is_market: false,
+        };
+        let order = &mut OrderEntity{
+            qty: qty,
+            grid_id: 0,
+            account_id: 0,
+        };
+        // we don't check whether the account has enough asset just abort
+        match<BaseType, QuoteType, FeeRatio>(account, price, opts, order);
+    }
+
+    public entry fun place_market_order<BaseType, QuoteType, FeeRatio>(
+        account: &signer,
+        side: u8,
+        qty: u64,
+        from_escrow: bool,
+        to_escrow: bool,
+    ) acquires Pair {
+        let taker_addr = address_of(account);
+        let opts = &PlaceOrderOpts {
+            addr: taker_addr,
+            side: side,
+            from_escrow: from_escrow,
+            to_escrow: to_escrow,
+            post_only: false,
+            ioc: false,
+            fok: false,
+            is_market: true,
+        };
+        let order = &mut OrderEntity{
+            qty: qty,
+            grid_id: 0,
+            account_id: 0,
+        };
+        // we don't check whether the account has enough asset just abort
+        match<BaseType, QuoteType, FeeRatio>(account, 0, opts, order);
+    }
+
+    // public entry fun place_grid_order<BaseType, QuoteType, FeeRatio>(
+    //     account: &signer,
+    //     price: u64,
+    //     per_qty: u64,
+    //     from_escrow: bool,
+    // ) acquires Pair {
+
+    // }
+
+    // Private functions ====================================================
+
+    fun get_best_price<V>(
+        tree: &RBTree<V>
+    ): u64 {
+        let leftmmost = rbtree::get_leftmost_key(tree);
+        ((leftmmost >> 64) as u64)
+    }
+
+    fun has_enough_asset<CoinType>(
+        addr: address,
+        amount: u64,
+        from_escrow: bool
+    ): bool {
+        let avail = if (!from_escrow) {
+            coin::balance<CoinType>(addr)
+        } else {
+            escrow::escrow_available<CoinType>(addr)
+        };
+        avail >= amount
+    }
+
     /// match buy order, taker is buyer, maker is seller
     /// 
     fun match<BaseType, QuoteType, FeeRatio>(
         taker: &signer,
         price: u64,
-        side: u8,
-        from_escrow: bool,
-        to_escrow: bool,
-        post_only: bool,
-        ioc: bool, // immediately and cancel
-        fok: bool, // fill or kill
+        opts: &PlaceOrderOpts,
         order: &mut OrderEntity
     ) acquires Pair {
         let taker_addr = address_of(taker);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
-        if (post_only) {
-            return
-        };
-        if (fok) {
-            // todo judge can fill taker order totally
+
+        if (opts.fok) {
+            // TODO judge can fill taker order totally
         };
 
-        let taker_opts = &mut PlaceOrderOpts {
-            addr: taker_addr,
-            side: side,
-            from_escrow: from_escrow,
-            to_escrow: to_escrow,
-            post_only: post_only,
-            ioc: ioc,
-            fok: fok,
-        };
         // let taker_account_id = if (to_escrow) {
         //     escrow::get_or_register_account_id(taker_addr)
         // } else 0;
@@ -252,23 +364,33 @@ module sea::spot {
             price,
             pair,
             order,
-            taker_opts,
+            opts,
         );
-        if (!completed) {
+
+        if ((!completed) && (!opts.is_market)) {
+            // TODO make sure order qty >= lot_size
             // place order to orderbook
-            let taker_account_id = escrow::get_account_id(taker_addr);
+            let taker_account_id = escrow::get_or_register_account_id(taker_addr);
             order.account_id = taker_account_id;
+            place_order(taker, opts.side, price, pair, order);
         }
     }
 
-    // Private functions ====================================================
-
     fun place_order<BaseType, QuoteType, FeeRatio>(
+        account: &signer,
         side: u8,
         price: u64,
         pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
         order: &mut OrderEntity
     ) {
+        // frozen
+        if (side == SELL) {
+            escrow::deposit<BaseType>(account, order.qty, true);
+        } else {
+            let vol = calc_quote_vol_for_buy(order.qty, price, pair.price_ratio);
+            escrow::deposit<QuoteType>(account, vol, true);
+        };
+
         let order_id = generate_order_id(pair);
         let orderbook = if (side == BUY) &mut pair.asks else &mut pair.bids;
         let key: u128 = generate_key(price, order_id);
@@ -306,8 +428,10 @@ module sea::spot {
         while (!rbtree::is_empty(orderbook)) {
             let (pos, key, order) = rbtree::borrow_leftmost_keyval_mut(orderbook);
             let (maker_price, _) = price::get_price_order_id(key);
-            if ((taker_side == BUY && price >= maker_price) ||
-                 (taker_side == SELL && price <=  maker_price)) {
+            if ((!taker_opts.is_market) && 
+                    ((taker_side == BUY && price >= maker_price) ||
+                     (taker_side == SELL && price <=  maker_price))
+             ) {
                 break
             };
 
@@ -348,6 +472,20 @@ module sea::spot {
         completed
     }
 
+    fun calc_quote_vol_for_buy(
+        qty: u64,
+        price: u64,
+        price_ratio: u64
+    ): u64 {
+        let vol_orig: u128 = (qty as u128) * (price as u128);
+        let vol: u128;
+
+        vol = vol_orig / (price_ratio as u128);
+        
+        assert!(vol < MAX_U64, E_VOL_EXCEED_MAX_U64);
+        (vol as u64)
+    }
+
     // calculate quote volume: quote_vol = price * base_amt
     fun calc_quote_vol(
         taker_side: u8,
@@ -357,7 +495,6 @@ module sea::spot {
         fee_ratio: u64): (u64, u64) {
         let vol_orig: u128 = (qty as u128) * (price as u128);
         let vol: u128;
-        let fee: u128;
 
         vol = vol_orig / (price_ratio as u128);
         

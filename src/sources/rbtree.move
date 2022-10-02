@@ -118,6 +118,12 @@ module sea::rbtree {
         vector::length<RBNode<V>>(&tree.nodes)
     }
 
+    public fun get_leftmost_key<V>(tree: &RBTree<V>): u128 {
+        let pos = tree.leftmost;
+        let node = vector::borrow<RBNode<V>>(&tree.nodes, pos-1);
+        node.key
+    }
+
     public fun borrow_leftmost_mut<V>(tree: &mut RBTree<V>): &mut RBNode<V> {
         let pos = tree.leftmost;
         vector::borrow_mut<RBNode<V>>(&mut tree.nodes, pos-1)

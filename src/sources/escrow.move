@@ -67,25 +67,47 @@ module sea::escrow {
         move_to(sea_admin, SpotEscrowAccountCapability { signer_cap });
     }
 
+    // get account escrow coin available
+    public fun escrow_available<CoinType>(
+        addr: address
+    ): u64 acquires AccountEscrow {
+        let ref = borrow_global<AccountEscrow<CoinType>>(addr);
+        coin::value(&ref.available)
+    }
+
+    // get account escrow coin available
+    public fun escrow_frozen<CoinType>(
+        addr: address
+    ): u64 acquires AccountEscrow {
+        let ref = borrow_global<AccountEscrow<CoinType>>(addr);
+        coin::value(&ref.frozen)
+    }
+
     public fun deposit<CoinType>(
         account: &signer,
         amount: u64,
+        is_frozen: bool
     ) acquires AccountEscrow {
         let account_addr = address_of(account);
-        // let coin_id = get_coin_id<CoinType>();
-        // coin::transfer<CoinType>(account, @sea_spot, amount);
-        // let account_id = get_account_id(account_addr);
-        // let escrow_ref = borrow_global_mut<EscrowAccountAsset>(@sea);
-        // let asset_id = account_asset_id(account_id, coin_id);
-
         if (exists<AccountEscrow<CoinType>>(account_addr)) {
             let current = borrow_global_mut<AccountEscrow<CoinType>>(account_addr);
-            coin::merge(&mut current.available, coin::withdraw(account, amount));
+            if (is_frozen) {
+                coin::merge(&mut current.frozen, coin::withdraw(account, amount));
+            } else {
+                coin::merge(&mut current.available, coin::withdraw(account, amount));
+            }
         } else {
-            move_to(account, AccountEscrow<CoinType>{
-                available: coin::withdraw(account, amount),
-                frozen: coin::zero(),
-            });
+            if (is_frozen) {
+                move_to(account, AccountEscrow<CoinType>{
+                    available: coin::zero(),
+                    frozen: coin::withdraw(account, amount),
+                });
+            } else {
+                move_to(account, AccountEscrow<CoinType>{
+                    available: coin::withdraw(account, amount),
+                    frozen: coin::zero(),
+                });
+            }
         };
         // if (table::contains(&escrow_ref.assets_map, asset_id)) {
         //     let asset_ref_mut = table::borrow_mut(&mut escrow_ref.assets_map, asset_id);
