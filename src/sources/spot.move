@@ -13,25 +13,36 @@ module sea::spot {
     use std::signer::address_of;
     // use std::vector;
     use aptos_framework::coin::{Self, Coin};
-    use aptos_std::table::{Self, Table};
-    use aptos_std::type_info::{Self, TypeInfo};
-    use aptos_framework::account::{Self, SignerCapability};
+    // use aptos_std::table::{Self, Table};
+    // use aptos_std::type_info::{Self, TypeInfo};
+    // use aptos_framework::account::{Self, SignerCapability};
     use sea::rbtree::{Self, RBTree};
     use sea::price;
     use sea::utils;
     use sea::fee;
     use sea::math;
-    use sea::spot_account;
+    use sea::escrow;
+    // use sea::spot_account;
 
     // Structs ====================================================
 
+    struct PlaceOrderOpts has copy, drop {
+        addr: address,
+        side: u8,
+        from_escrow: bool,
+        to_escrow: bool,
+        post_only: bool,
+        ioc: bool,
+        fok: bool,
+    }
+
     /// OrderEntity order entity. price, pair_id is on OrderBook
-    struct OrderEntity has store {
+    struct OrderEntity has copy, store {
         // base coin amount
         // we use qty to indicate base amount, vol to indicate quote amount
         qty: u64,
         // the grid id or 0 if is not grid
-        grid: u64,
+        grid_id: u64,
         // user address
         // user: address,
         // escrow account id
@@ -39,9 +50,11 @@ module sea::spot {
     }
 
     struct Pair<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
-        fee: u64,
+        n_order: u64,
+        fee_ratio: u64,
         base_id: u64,
         quote_id: u64,
+        pair_id: u64,
         lot_size: u64,
         // multiply: bool,         // price_ratio is multiply or divided
         price_ratio: u64,       // price_coefficient*pow(10, base_precision-quote_precision)
@@ -52,6 +65,8 @@ module sea::spot {
         quote: Coin<QuoteType>,
         asks: RBTree<OrderEntity>,
         bids: RBTree<OrderEntity>,
+        base_vault: Coin<BaseType>,
+        quote_vault: Coin<QuoteType>,
     }
 
     struct QuoteConfig<phantom QuoteType> has key {
@@ -61,6 +76,11 @@ module sea::spot {
         quote: Coin<QuoteType>,
     }
 
+    // pairs count
+    struct NPair has key {
+        n_pair: u64
+    }
+
     // struct SpotMarket<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
     //     fee: u64,
     //     n_pair: u64,
@@ -68,19 +88,21 @@ module sea::spot {
     //     quotes: Table<u64, QuoteConfig<QuoteType>>,
     //     pairs: Table<u64, Pair<BaseType, QuoteType, FeeRatio>>
     // }
-    struct SpotCoins has key {
-        n_coin: u64,
-        n_quote: u64,
-        coin_map: Table<TypeInfo, u64>,
-        quote_map: Table<TypeInfo, u64>,
-    }
+    // struct SpotCoins has key {
+    //     n_coin: u64,
+    //     n_quote: u64,
+    //     coin_map: Table<TypeInfo, u64>,
+    //     quote_map: Table<TypeInfo, u64>,
+    // }
 
     /// Stores resource account signer capability under Liquidswap account.
-    struct SpotAccountCapability has key { signer_cap: SignerCapability }
+    // struct SpotAccountCapability has key { signer_cap: SignerCapability }
 
     // Constants ====================================================
     const BUY: u8 = 1;
     const SELL: u8 = 2;
+    const MAX_PAIR_ID: u64 = 0xffffff;
+    const ORDER_ID_MASK: u64 = 0xffffffffff;
     const MAX_U64: u128 = 0xffffffffffffffff;
 
     const E_PAIR_NOT_EXIST:      u64 = 1;
@@ -92,19 +114,16 @@ module sea::spot {
     const E_PAIR_EXISTS:         u64 = 7;
     const E_PAIR_PRICE_INVALID:  u64 = 8;
     const E_NOT_QUOTE_COIN:      u64 = 9;
+    const E_EXCEED_PAIR_COUNT:   u64 = 10;
 
     // Public functions ====================================================
 
     public entry fun initialize(sea_admin: &signer) {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
-        let signer_cap = spot_account::retrieve_signer_cap(sea_admin);
-        move_to(sea_admin, SpotAccountCapability { signer_cap });
-
-        move_to(sea_admin, SpotCoins {
-            n_coin: 0,
-            n_quote: 0,
-            coin_map: table::new<TypeInfo, u64>(),
-            quote_map: table::new<TypeInfo, u64>()
+        // let signer_cap = spot_account::retrieve_signer_cap(sea_admin);
+        // move_to(sea_admin, SpotAccountCapability { signer_cap });
+        move_to(sea_admin, NPair {
+            n_pair: 0,
         });
     }
 
@@ -128,10 +147,10 @@ module sea::spot {
         quote: Coin<QuoteType>,
         tick_size: u64,
         min_notional: u64,
-    ) acquires SpotCoins {
+    ) {
         assert!(address_of(account) == @sea, E_NO_AUTH);
         assert!(!exists<QuoteConfig<QuoteType>>(@sea), E_QUOTE_CONFIG_EXISTS);
-        let quote_id = get_or_register_coin_id(type_info::type_of<Coin<QuoteType>>(), true);
+        let quote_id = escrow::get_or_register_coin_id<QuoteType>(true);
 
         move_to(account, QuoteConfig{
             quote_id: quote_id,
@@ -148,30 +167,36 @@ module sea::spot {
         base: Coin<BaseType>,
         quote: Coin<QuoteType>,
         price_coefficient: u64
-    ) acquires SpotCoins, SpotAccountCapability {
+    ) acquires NPair {
         utils::assert_is_coin<BaseType>();
         utils::assert_is_coin<QuoteType>();
-        assert!(is_quote_coin<QuoteType>(), E_NOT_QUOTE_COIN);
+        assert!(escrow::is_quote_coin<QuoteType>(), E_NOT_QUOTE_COIN);
         assert!(!exists<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot), E_PAIR_EXISTS);
 
-        let base_id = get_or_register_coin_id(type_info::type_of<BaseType>(), false);
-        let quote_id = get_or_register_coin_id(type_info::type_of<QuoteType>(), true);
-        let spot_cap = borrow_global<SpotAccountCapability>(@sea);
-        let pair_account = account::create_signer_with_capability(&spot_cap.signer_cap);
-        let fee = fee::get_fee_ratio<FeeRatio>();
+        let base_id = escrow::get_or_register_coin_id<BaseType>(false);
+        let quote_id = escrow::get_or_register_coin_id<QuoteType>(true);
+        // let spot_cap = borrow_global<SpotAccountCapability>(@sea);
+        // let pair_account = account::create_signer_with_capability(&spot_cap.signer_cap);
+        let pair_account = escrow::get_spot_account();
+        let fee_ratio = fee::get_fee_ratio<FeeRatio>();
         let base_scale = math::pow_10(coin::decimals<BaseType>());
         let quote_scale = math::pow_10(coin::decimals<QuoteType>());
-        
-        // todo validate the pow_10(base_decimals-quote_decimals) < price_coefficient
+        let npair = borrow_global_mut<NPair>(@sea);
+        let pair_id = npair.n_pair + 1;
+        assert!(pair_id <= MAX_PAIR_ID, E_EXCEED_PAIR_COUNT);
+        npair.n_pair = pair_id;
+        // validate the pow_10(base_decimals-quote_decimals) < price_coefficient
         let (ratio, ok) = price::calc_price_ratio(
             base_scale,
             quote_scale,
             price_coefficient);
         assert!(ok, E_PAIR_PRICE_INVALID);
         let pair: Pair<BaseType, QuoteType, FeeRatio> = Pair{
-            fee: fee,
+            n_order: 0,
+            fee_ratio: fee_ratio,
             base_id: base_id,
             quote_id: quote_id,
+            pair_id: pair_id,
             lot_size: 0,
             price_ratio: ratio,       // price_coefficient*pow(10, base_precision-quote_precision)
             price_coefficient: price_coefficient, // price coefficient, from 10^1 to 10^12
@@ -181,6 +206,8 @@ module sea::spot {
             quote: quote,
             asks: rbtree::empty<OrderEntity>(true),  // less price is in left
             bids: rbtree::empty<OrderEntity>(false),
+            base_vault: coin::zero(),
+            quote_vault: coin::zero(),
         };
         move_to(&pair_account, pair);
         // todo events
@@ -188,50 +215,93 @@ module sea::spot {
 
     /// match buy order, taker is buyer, maker is seller
     /// 
-    public fun match(
-        side: bool,
-        orderbook: &mut RBTree<OrderEntity>,
-        taker: &mut OrderEntity
-    ) {
+    fun match<BaseType, QuoteType, FeeRatio>(
+        taker: &signer,
+        price: u64,
+        side: u8,
+        from_escrow: bool,
+        to_escrow: bool,
+        post_only: bool,
+        ioc: bool, // immediately and cancel
+        fok: bool, // fill or kill
+        order: &mut OrderEntity
+    ) acquires Pair {
+        let taker_addr = address_of(taker);
+        let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+        if (post_only) {
+            return
+        };
+        if (fok) {
+            // todo judge can fill taker order totally
+        };
 
-    }
-
-    public fun is_quote_coin<CoinType>(): bool acquires SpotCoins {
-        let info = type_info::type_of<CoinType>();
-        let coinlist = borrow_global<SpotCoins>(@sea);
-        table::contains<TypeInfo, u64>(&coinlist.quote_map, info)
+        let taker_opts = &mut PlaceOrderOpts {
+            addr: taker_addr,
+            side: side,
+            from_escrow: from_escrow,
+            to_escrow: to_escrow,
+            post_only: post_only,
+            ioc: ioc,
+            fok: fok,
+        };
+        // let taker_account_id = if (to_escrow) {
+        //     escrow::get_or_register_account_id(taker_addr)
+        // } else 0;
+        let completed = match_internal(
+            taker,
+            price,
+            pair,
+            order,
+            taker_opts,
+        );
+        if (!completed) {
+            // place order to orderbook
+            let taker_account_id = escrow::get_account_id(taker_addr);
+            order.account_id = taker_account_id;
+        }
     }
 
     // Private functions ====================================================
 
-    fun get_or_register_coin_id(info: TypeInfo, is_quote: bool): u64 acquires SpotCoins {
-        let coinlist = borrow_global_mut<SpotCoins>(@sea);
+    fun place_order<BaseType, QuoteType, FeeRatio>(
+        side: u8,
+        price: u64,
+        pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
+        order: &mut OrderEntity
+    ) {
+        let order_id = generate_order_id(pair);
+        let orderbook = if (side == BUY) &mut pair.asks else &mut pair.bids;
+        let key: u128 = generate_key(price, order_id);
+        rbtree::rb_insert<OrderEntity>(orderbook, key, *order);
+    }
 
-        if (table::contains<TypeInfo, u64>(&coinlist.coin_map, info)) {
-            let cid = table::borrow(&coinlist.coin_map, info);
-            return *cid
-        };
-        coinlist.n_coin = coinlist.n_coin + 1;
-        let id = coinlist.n_coin;
-        if (is_quote) {
-            coinlist.n_quote = coinlist.n_quote + 1;
-            table::add<TypeInfo, u64>(&mut coinlist.quote_map, info, id);
-        };
-        table::add<TypeInfo, u64>(&mut coinlist.coin_map, info, id);
+    fun generate_key(price: u64, order_id: u64): u128 {
+        (((price as u128) << 64) | (order_id as u128))
+    }
+
+    fun generate_order_id<BaseType, QuoteType, FeeRatio>(
+        pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
+        ): u64 {
+        // first 24 bit is pair_id
+        // left 40 bit is order_id
+        let id = pair.pair_id << 40 | (pair.n_order & ORDER_ID_MASK);
+        pair.n_order = pair.n_order + 1;
         id
     }
 
-    fun match_internal(
-        taker_side: u8,
-        base_id: u64,
-        quote_id: u64,
+    fun match_internal<BaseType, QuoteType, FeeRatio>(
+        taker: &signer,
         price: u64,
-        price_ratio: u64,
+        pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
         taker_order: &mut OrderEntity,
-        orderbook: &mut RBTree<OrderEntity>,
+        taker_opts: &PlaceOrderOpts,
     ): bool {
         // does the taker order is total filled
         let completed = false;
+        let fee_ratio = pair.fee_ratio;
+        let price_ratio = pair.price_ratio;
+        let taker_side = taker_opts.side;
+        let orderbook = if (taker_side == BUY) &mut pair.asks else &mut pair.bids;
 
         while (!rbtree::is_empty(orderbook)) {
             let (pos, key, order) = rbtree::borrow_leftmost_keyval_mut(orderbook);
@@ -253,19 +323,22 @@ module sea::spot {
             };
             taker_order.qty = taker_order.qty - match_qty;
             order.qty = order.qty - match_qty;
-            let quote_vol = calc_quote_vol(match_qty, maker_price, price_ratio);
+            let (quote_vol, fee_amt) = calc_quote_vol(taker_side, match_qty, maker_price, price_ratio, fee_ratio);
+            let (fee_plat, fee_maker) = fee::get_maker_fee_shares(fee_amt, fee_ratio);
 
-            swap_internal(
-                taker_side,
-                base_id,
-                quote_id,
-                taker_order.account_id,
+            swap_internal<BaseType, QuoteType, FeeRatio>(
+                &mut pair.base_vault,
+                &mut pair.quote_vault,
+                taker,
+                taker_opts,
                 order.account_id,
                 match_qty,
-                quote_vol);
+                quote_vol,
+                fee_plat,
+                fee_maker);
             if (remove_order) {
                 let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
-                let OrderEntity {qty: _, grid: _, account_id: _} = pop_order;
+                let OrderEntity {qty: _, grid_id: _, account_id: _} = pop_order;
             };
             if (completed) {
                 break
@@ -277,35 +350,87 @@ module sea::spot {
 
     // calculate quote volume: quote_vol = price * base_amt
     fun calc_quote_vol(
+        taker_side: u8,
         qty: u64,
         price: u64,
-        price_ratio: u64): u64 {
+        price_ratio: u64,
+        fee_ratio: u64): (u64, u64) {
         let vol_orig: u128 = (qty as u128) * (price as u128);
         let vol: u128;
+        let fee: u128;
 
         vol = vol_orig / (price_ratio as u128);
         
         assert!(vol < MAX_U64, E_VOL_EXCEED_MAX_U64);
-        (vol as u64)
+        let fee: u128 = (
+            if (taker_side == BUY) {
+                // buy, fee is base coin
+                (qty as u128) * (fee_ratio as u128) / 1000000
+            } else {
+                vol * (fee_ratio as u128) / 1000000
+            });
+        assert!(fee < MAX_U64, E_VOL_EXCEED_MAX_U64);
+        ((vol as u64), (fee as u64))
     }
 
     // direct transfer coin to taker account
     // increase maker escrow
-    fun swap_internal(
-        taker_side: u8,
-        _base_id: u64,
-        _quote_id: u64,
-        _taker: u64,
-        _maker: u64,
-        _base_qty: u64,
-        _quote_vol: u64
+    fun swap_internal<BaseType, QuoteType, FeeRatio>(
+        pair_base_vault: &mut Coin<BaseType>,
+        pair_quote_vault: &mut Coin<QuoteType>,
+        taker: &signer,
+        taker_opts: &PlaceOrderOpts,
+        maker_id: u64,
+        base_qty: u64,
+        quote_vol: u64,
+        fee_plat_amt: u64,
+        fee_maker_amt: u64,
     ) {
-        if (taker_side == BUY) {
+        let maker_addr = escrow::get_account_addr_by_id(maker_id);
+        let taker_addr = taker_opts.addr;
+
+        if (taker_opts.side == BUY) {
             // taker got base coin
+            let to_taker = escrow::dec_escrow_coin<BaseType>(maker_addr, base_qty-fee_maker_amt, true);
+            if (fee_plat_amt > 0) {
+                // platform vault
+                let to_plat = coin::extract(&mut to_taker, fee_plat_amt);
+                coin::merge(pair_base_vault, to_plat);
+            };
+            if (taker_opts.to_escrow) {
+                escrow::incr_escrow_coin<BaseType>(taker_addr, to_taker, false);
+            } else {
+                // send to taker directly
+                coin::deposit(taker_addr, to_taker);
+            };
             // maker got quote coin
+            let quote = if (taker_opts.from_escrow) {
+                    escrow::dec_escrow_coin<QuoteType>(taker_addr, quote_vol, false)
+                } else {
+                    coin::withdraw<QuoteType>(taker, quote_vol)
+                };
+            escrow::incr_escrow_coin<QuoteType>(maker_addr, quote, false);
         } else {
             // taker got quote coin
+            let to_taker = escrow::dec_escrow_coin<QuoteType>(maker_addr, quote_vol-fee_maker_amt, true);
+            if (fee_plat_amt > 0) {
+                // todo platform vault
+                let to_plat = coin::extract(&mut to_taker, fee_plat_amt);
+                coin::merge(pair_quote_vault, to_plat);
+            };
+            if (taker_opts.to_escrow) {
+                escrow::incr_escrow_coin<QuoteType>(taker_addr, to_taker, false);
+            } else {
+                // send to taker directly
+                coin::deposit(taker_addr, to_taker);
+            };
             // maker got base coin
+            let base = if (taker_opts.from_escrow) {
+                    escrow::dec_escrow_coin<BaseType>(taker_addr, base_qty, false)
+                } else {
+                    coin::withdraw<BaseType>(taker, base_qty)
+                };
+            escrow::incr_escrow_coin<BaseType>(maker_addr, base, false);
         }
     }
 
