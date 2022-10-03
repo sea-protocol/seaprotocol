@@ -104,7 +104,7 @@ module sea::fee {
 
     #[test(
         sea_admin = @sea,
-        account = @user
+        account = @user_1
     )]
     #[expected_failure(abort_code = 4001)] 
     fun test_modify_fee_share_unauth(

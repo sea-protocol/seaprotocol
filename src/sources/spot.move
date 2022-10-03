@@ -61,8 +61,8 @@ module sea::spot {
         price_coefficient: u64, // price coefficient, from 10^1 to 10^12
         last_price: u64,        // last trade price
         last_timestamp: u64,    // last trade timestamp
-        base: Coin<BaseType>,
-        quote: Coin<QuoteType>,
+        // base: Coin<BaseType>,
+        // quote: Coin<QuoteType>,
         asks: RBTree<OrderEntity>,
         bids: RBTree<OrderEntity>,
         base_vault: Coin<BaseType>,
@@ -73,12 +73,13 @@ module sea::spot {
         quote_id: u64,
         tick_size: u64,
         min_notional: u64,
-        quote: Coin<QuoteType>,
+        // quote: Coin<QuoteType>,
     }
 
     // pairs count
     struct NPair has key {
-        n_pair: u64
+        n_pair: u64,
+        n_grid: u64,
     }
 
     // struct SpotMarket<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
@@ -120,15 +121,18 @@ module sea::spot {
     const E_QUOTE_NOT_ENOUGH:    u64 = 12;
     const E_PRICE_TOO_LOW:       u64 = 13;
     const E_PRICE_TOO_HIGH:      u64 = 14;
+    const E_INITIALIZED:         u64 = 15;
 
     // Public functions ====================================================
 
     public entry fun initialize(sea_admin: &signer) {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
+        assert!(!exists<NPair>(address_of(sea_admin)), E_INITIALIZED);
         // let signer_cap = spot_account::retrieve_signer_cap(sea_admin);
         // move_to(sea_admin, SpotAccountCapability { signer_cap });
         move_to(sea_admin, NPair {
             n_pair: 0,
+            n_grid: 0,
         });
     }
 
@@ -149,7 +153,6 @@ module sea::spot {
     /// register_quote only the admin can register quote coin
     public fun register_quote<QuoteType>(
         account: &signer,
-        quote: Coin<QuoteType>,
         tick_size: u64,
         min_notional: u64,
     ) {
@@ -157,11 +160,11 @@ module sea::spot {
         assert!(!exists<QuoteConfig<QuoteType>>(@sea), E_QUOTE_CONFIG_EXISTS);
         let quote_id = escrow::get_or_register_coin_id<QuoteType>(true);
 
-        move_to(account, QuoteConfig{
+        move_to(account, QuoteConfig<QuoteType>{
             quote_id: quote_id,
             tick_size: tick_size,
             min_notional: min_notional,
-            quote: quote,
+            // quote: quote,
         })
         // todo event
     }
@@ -169,8 +172,6 @@ module sea::spot {
     // register pair, quote should be one of the egliable quote
     public fun register_pair<BaseType, QuoteType, FeeRatio>(
         _owner: &signer,
-        base: Coin<BaseType>,
-        quote: Coin<QuoteType>,
         price_coefficient: u64
     ) acquires NPair {
         utils::assert_is_coin<BaseType>();
@@ -207,8 +208,6 @@ module sea::spot {
             price_coefficient: price_coefficient, // price coefficient, from 10^1 to 10^12
             last_price: 0,        // last trade price
             last_timestamp: 0,    // last trade timestamp
-            base: base,
-            quote: quote,
             asks: rbtree::empty<OrderEntity>(true),  // less price is in left
             bids: rbtree::empty<OrderEntity>(false),
             base_vault: coin::zero(),
@@ -317,6 +316,9 @@ module sea::spot {
     // ) acquires Pair {
 
     // }
+
+    // get pair prices, both asks and bids
+    public entry fun get_pair_price_steps() {}
 
     // Private functions ====================================================
 
@@ -457,7 +459,7 @@ module sea::spot {
             taker_order.qty = taker_order.qty - match_qty;
             order.qty = order.qty - match_qty;
             let (quote_vol, fee_amt) = calc_quote_vol(taker_side, match_qty, maker_price, price_ratio, fee_ratio);
-            let (fee_plat, fee_maker) = fee::get_maker_fee_shares(fee_amt, fee_ratio);
+            let (fee_plat, fee_maker) = fee::get_maker_fee_shares(fee_amt, order.grid_id > 0);
 
             swap_internal<BaseType, QuoteType, FeeRatio>(
                 &mut pair.base_vault,
@@ -583,6 +585,183 @@ module sea::spot {
     fun swap_coin(
         _step: &mut OrderEntity,
         ) {
+
+    }
+
+    // Test-only functions ====================================================
+    #[test_only]
+    use sea::spot_account;
+    #[test_only]
+    use std::string;
+    #[test_only]
+    use aptos_framework::aptos_account;
+
+    #[test_only]
+    fun test_place_postonly_order() {
+
+    }
+
+    #[test_only]
+    struct T_USD {}
+
+    #[test_only]
+    struct T_BTC {}
+
+    #[test_only]
+    struct T_SEA {}
+    
+    #[test_only]
+    struct T_ETH {}
+
+    #[test_only]
+    struct T_BAR {}
+    
+    #[test_only]
+    struct TPrice has copy, drop {
+        side: u8,
+        qty: u64,
+        price: u64,
+        price_ratio: u64
+    }
+
+    #[test_only]
+    fun test_prepare_account_env(
+        sea_admin: &signer
+    ) {
+        spot_account::initialize_spot_account(sea_admin);
+        initialize(sea_admin);
+        escrow::initialize(sea_admin);
+    }
+
+    #[test_only]
+    fun create_test_coins<T>(
+        sea_admin: &signer,
+        name: vector<u8>,
+        decimals: u8,
+        user_a: &signer,
+        user_b: &signer,
+        user_c: &signer,
+        amt_a: u64,
+        amt_b: u64,
+        amt_c: u64,
+    ) {
+        let (bc, fc, mc) = coin::initialize<T>(sea_admin,
+            string::utf8(name),
+            string::utf8(name),
+            decimals,
+            false);
+        coin::destroy_burn_cap(bc);
+        coin::destroy_freeze_cap(fc);
+        coin::register<T>(sea_admin);
+        coin::register<T>(user_a);
+        coin::register<T>(user_b);
+        coin::register<T>(user_c);
+        coin::deposit(address_of(user_a), coin::mint<T>(amt_a, &mc));
+        coin::deposit(address_of(user_b), coin::mint<T>(amt_b, &mc));
+        coin::deposit(address_of(user_c), coin::mint<T>(amt_c, &mc));
+        coin::destroy_mint_cap(mc);
+    }
+
+    #[test_only]
+    fun test_init_coins_and_accounts(
+        sea_admin: &signer,
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        aptos_account::create_account(address_of(sea_admin));
+        aptos_account::create_account(address_of(user1));
+        aptos_account::create_account(address_of(user2));
+        aptos_account::create_account(address_of(user3));
+        let usd_amt = 10000000*100000000;
+        let btc_amt = 100*100000000;
+        let sea_amt = 100000000*1000000;
+        let bar_amt = 10000000000*100000;
+        let eth_amt = 10000*100000000;
+        // T_USD T_BTC T_SEA T_BAR T_ETH
+        create_test_coins<T_USD>(sea_admin, b"USD", 8, user1, user2, user3, usd_amt, usd_amt, usd_amt);
+        create_test_coins<T_BTC>(sea_admin, b"BTC", 8, user1, user2, user3, btc_amt, btc_amt, btc_amt);
+        create_test_coins<T_SEA>(sea_admin, b"SEA", 6, user1, user2, user3, sea_amt, sea_amt, sea_amt);
+        create_test_coins<T_BAR>(sea_admin, b"BAR", 5, user1, user2, user3, bar_amt, bar_amt, bar_amt);
+        create_test_coins<T_ETH>(sea_admin, b"ETH", 8, user1, user2, user3, eth_amt, eth_amt, eth_amt);
+
+        assert!(coin::balance<T_USD>(address_of(user1)) == usd_amt, 1);
+        assert!(coin::balance<T_USD>(address_of(user2)) == usd_amt, 2);
+        assert!(coin::balance<T_USD>(address_of(user3)) == usd_amt, 3);
+
+        assert!(coin::balance<T_BTC>(address_of(user1)) == btc_amt, 11);
+        assert!(coin::balance<T_BTC>(address_of(user2)) == btc_amt, 12);
+        assert!(coin::balance<T_BTC>(address_of(user3)) == btc_amt, 13);
+
+        assert!(coin::balance<T_SEA>(address_of(user1)) == sea_amt, 21);
+        assert!(coin::balance<T_SEA>(address_of(user2)) == sea_amt, 22);
+        assert!(coin::balance<T_SEA>(address_of(user3)) == sea_amt, 23);
+
+        assert!(coin::balance<T_BAR>(address_of(user1)) == bar_amt, 31);
+        assert!(coin::balance<T_BAR>(address_of(user2)) == bar_amt, 32);
+        assert!(coin::balance<T_BAR>(address_of(user3)) == bar_amt, 33);
+
+        assert!(coin::balance<T_ETH>(address_of(user1)) == eth_amt, 41);
+        assert!(coin::balance<T_ETH>(address_of(user2)) == eth_amt, 42);
+        assert!(coin::balance<T_ETH>(address_of(user3)) == eth_amt, 43);
+    }
+
+    // Tests ==================================================================
+    #[test]
+    fun test_calc_quote_volume() {
+        let price = 152210000000; // 1500.1
+        let price_ratio = 100000000;
+        let qty = 150000; // 0.15, 6 decimals
+        let fee_ratio = 1000; // 0.1%
+        let (vol, fee) = calc_quote_vol(BUY, qty, price, price_ratio, fee_ratio);
+
+        assert!(vol == 228315000, 100001);
+        assert!(fee == 150, 100002);
+    }
+
+    #[test(
+        sea_admin = @sea,
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_register_pair(
+        sea_admin: &signer,
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair {
+        test_prepare_account_env(sea_admin);
+        test_init_coins_and_accounts(sea_admin, user1, user2, user3);
+        // 1. register quote
+        register_quote<T_USD>(sea_admin, 10, 10);
+        // 2. 
+        register_pair<T_BTC, T_USD, fee::FeeRatio200>(sea_admin, 10000000);
+    }
+
+    #[test(sea_admin = @sea)]
+    fun test_register_quote(
+        sea_admin: &signer
+    ) {
+        test_prepare_account_env(sea_admin);
+        // 1. register quote
+        register_quote<T_USD>(sea_admin, 10, 10);
+    }
+
+    #[test(sea_admin = @sea)]
+    #[expected_failure(abort_code = 3)] // E_QUOTE_CONFIG_EXISTS
+    fun test_register_quote_dup(
+        sea_admin: &signer
+    ) {
+        test_prepare_account_env(sea_admin);
+        // 1. register quote
+        register_quote<T_USD>(sea_admin, 10, 10);
+        // 2. 
+        register_quote<T_USD>(sea_admin, 10, 10);
+    }
+
+    #[test]
+    fun test_e2e_place_limit_order() {
 
     }
 }

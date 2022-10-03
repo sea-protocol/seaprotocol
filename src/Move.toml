@@ -8,11 +8,9 @@ sea = "0x393a63f47da7a757a252cb44fbab2afe602efe9d88e8ae84aac7db4949a9beb0"
 sea_spot = "0x5e8c5122bd2ce18e45912699613ab527697bf58556815c08ad5463092dd91990"
 
 # Mock users for unit tests
-user = "0x12"
-user_0 = "0x34"
-user_1 = "0x56"
-user_2 = "0x78"
-user_3 = "0x90"
+user_1 = "0x1111"
+user_2 = "0x2222"
+user_3 = "0x3333"
 
 [dependencies.SeaInit]
 local = "./sea_init/"
