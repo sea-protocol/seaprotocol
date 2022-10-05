@@ -118,10 +118,52 @@ module sea::rbtree {
         vector::length<RBNode<V>>(&tree.nodes)
     }
 
-    public fun get_leftmost_key<V>(tree: &RBTree<V>): u128 {
+    public fun get_leftmost_key<V>(
+        tree: &RBTree<V>
+    ): u128 {
         let pos = tree.leftmost;
         let node = vector::borrow<RBNode<V>>(&tree.nodes, pos-1);
         node.key
+    }
+
+    public fun get_leftmost_pos_key<V>(
+        tree: &RBTree<V>
+    ): (u64, u128) {
+        let pos = tree.leftmost;
+        let node = vector::borrow<RBNode<V>>(&tree.nodes, pos-1);
+        (get_position(node.color_parent), node.key)
+    }
+
+    public fun get_leftmost_pos_key_val<V>(
+        tree: &RBTree<V>
+    ): (u64, u128, &V) {
+        let pos = tree.leftmost;
+        let node = vector::borrow<RBNode<V>>(&tree.nodes, pos-1);
+        (get_position(node.color_parent), node.key, &node.value)
+    }
+
+    // return (pos, key)
+    // if pos is 0, it has not next
+    public fun get_next_pos_key<V>(
+        tree: &RBTree<V>,
+        pos: u64): (u64, u128) {
+        let next = next_pos(tree, pos);
+        if (next == 0) {
+            return (0, 0)
+        };
+        let node = get_node<V>(&tree.nodes, next);
+        (next, node.key)
+    }
+
+    /// Return immutable reference to value corresponding to position `pos` in
+    /// `tree`, abort if the tree is empty
+    public fun borrow_by_pos<V>(
+        tree: &RBTree<V>,
+        pos: u64): &V {
+        let next = next_pos(tree, pos);
+        assert!(next > 0, E_NOT_EXIST);
+        let node = get_node<V>(&tree.nodes, next);
+        &node.value
     }
 
     public fun borrow_leftmost_mut<V>(tree: &mut RBTree<V>): &mut RBNode<V> {
