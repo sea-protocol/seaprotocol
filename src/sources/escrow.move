@@ -71,6 +71,9 @@ module sea::escrow {
     public fun escrow_available<CoinType>(
         addr: address
     ): u64 acquires AccountEscrow {
+        if (!exists<AccountEscrow<CoinType>>(addr)) {
+            return 0
+        };
         let ref = borrow_global<AccountEscrow<CoinType>>(addr);
         coin::value(&ref.available)
     }
@@ -79,8 +82,24 @@ module sea::escrow {
     public fun escrow_frozen<CoinType>(
         addr: address
     ): u64 acquires AccountEscrow {
+        if (!exists<AccountEscrow<CoinType>>(addr)) {
+            return 0
+        };
         let ref = borrow_global<AccountEscrow<CoinType>>(addr);
         coin::value(&ref.frozen)
+    }
+
+    public fun check_init_account_escrow<CoinType>(
+        account: &signer
+    ) {
+        let account_addr = address_of(account);
+
+        if (!exists<AccountEscrow<CoinType>>(account_addr)) {
+            move_to(account, AccountEscrow<CoinType>{
+                available: coin::zero(),
+                frozen: coin::zero(),
+            });
+        }
     }
 
     public fun deposit<CoinType>(

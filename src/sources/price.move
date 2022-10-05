@@ -15,13 +15,13 @@
 /// here, the rule is effective digits
 /// 
 module sea::price {
-
     // Constants ====================================================
     const E1: u128 = 10;
     const E2: u128 = 100;
     const E4: u128 = 10000;
     const E8: u128 = 100000000;
     const MAX_EFFECTIVE_DIGITS: u128 = 1000000;
+    const MAX_U64: u128 = 0xffffffff;
     // 64 bit
     const ORDER_ID_MASK: u128 = 0xffffffffffffffff;
 
@@ -29,13 +29,28 @@ module sea::price {
         (((v >> 64) as u64), ((v & ORDER_ID_MASK) as u64))
     }
 
+    // price_ratio = price_coefficient / math.pow(10, quote_decimals-base_decimals)
+    // price = price_decimal * price_coefficient
+    // quote = base * price / price_ratio = base * price_decimal * math.pow(10, quote_decimals-base_decimals)
+    // price_ratio should >= 1 or else return false
     public fun calc_price_ratio(
-        _base_scale: u64,
-        _quote_scale: u64,
-        _price_coefficient: u64,
+        base_scale: u64,
+        quote_scale: u64,
+        price_coefficient: u64,
     ): (u64, bool) {
-        // todo
-        (1, true)
+        if (quote_scale >= base_scale) {
+            let delta = quote_scale/base_scale;
+            if (price_coefficient < delta) {
+                return (0, false)
+            };
+            (price_coefficient/delta, true)
+        } else {
+            let ratio = ((price_coefficient as u128) * ((base_scale/quote_scale) as u128));
+            if (ratio > MAX_U64) {
+                return (0, false)
+            };
+            ((ratio as u64), true)
+        }
     }
 
     // check the price is valid
@@ -124,5 +139,10 @@ module sea::price {
                 price = price * 10;
             };
         }
+    }
+
+    #[test]
+    fun test_calc_price_ratio() {
+
     }
 }
