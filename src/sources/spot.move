@@ -927,8 +927,8 @@ module sea::spot {
     use std::string;
     #[test_only]
     use aptos_framework::aptos_account;
-    // #[test_only]
-    // use std::debug;
+    #[test_only]
+    use std::debug;
 
     #[test_only]
     const T_USD_AMT: u64 = 10000000*100000000;
