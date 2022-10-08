@@ -12,7 +12,7 @@
 module sea::spot {
     use std::signer::address_of;
     use std::vector;
-    use std::debug;
+    // use std::debug;
     use aptos_framework::coin::{Self, Coin};
     use aptos_framework::block;
     // use aptos_std::table::{Self, Table};
@@ -40,7 +40,7 @@ module sea::spot {
     }
 
     /// OrderEntity order entity. price, pair_id is on OrderBook
-    struct OrderEntity has copy, drop, store {
+    struct OrderEntity<phantom BaseType, phantom QuoteType> has store {
         // base coin amount
         // we use qty to indicate base amount, vol to indicate quote amount
         qty: u64,
@@ -49,7 +49,9 @@ module sea::spot {
         // user address
         // user: address,
         // escrow account id
-        account_id: u64
+        account_id: u64,
+        base_frozen: Coin<BaseType>,
+        quote_frozen: Coin<QuoteType>,
     }
 
     struct Pair<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
@@ -66,8 +68,8 @@ module sea::spot {
         last_timestamp: u64,    // last trade timestamp
         // base: Coin<BaseType>,
         // quote: Coin<QuoteType>,
-        asks: RBTree<OrderEntity>,
-        bids: RBTree<OrderEntity>,
+        asks: RBTree<OrderEntity<BaseType, QuoteType>>,
+        bids: RBTree<OrderEntity<BaseType, QuoteType>>,
         base_vault: Coin<BaseType>,
         quote_vault: Coin<QuoteType>,
     }
@@ -90,6 +92,13 @@ module sea::spot {
         price: u64,
         qty: u64,
         orders: u64,
+    }
+
+    // order key, order qty
+    // order_key = price << 64 | order_id
+    struct OrderKeyQty has copy, drop {
+        key: u128,
+        qty: u64,
     }
 
     // struct SpotMarket<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
@@ -221,8 +230,8 @@ module sea::spot {
             price_coefficient: price_coefficient, // price coefficient, from 10^1 to 10^12
             last_price: 0,        // last trade price
             last_timestamp: 0,    // last trade timestamp
-            asks: rbtree::empty<OrderEntity>(true),  // less price is in left
-            bids: rbtree::empty<OrderEntity>(false),
+            asks: rbtree::empty<OrderEntity<BaseType, QuoteType>>(true),  // less price is in left
+            bids: rbtree::empty<OrderEntity<BaseType, QuoteType>>(false),
             base_vault: coin::zero(),
             quote_vault: coin::zero(),
         };
@@ -255,10 +264,12 @@ module sea::spot {
                 assert!(price <= ask0, E_PRICE_TOO_HIGH);
             }
         };
-        let order = &mut OrderEntity{
+        let order = OrderEntity{
             qty: qty,
             grid_id: 0,
             account_id: escrow::get_or_register_account_id(account_addr),
+            base_frozen: coin::zero(),
+            quote_frozen: coin::zero(),
         };
         check_init_taker_escrow<BaseType, QuoteType>(account, side);
         place_order(account, account_addr, side, from_escrow, price, pair, order)
@@ -288,10 +299,12 @@ module sea::spot {
             fok: fok,
             is_market: false,
         };
-        let order = &mut OrderEntity{
+        let order = OrderEntity{
             qty: qty,
             grid_id: 0,
             account_id: 0,
+            base_frozen: coin::zero(),
+            quote_frozen: coin::zero(),
         };
         if (to_escrow) {
             check_init_taker_escrow<BaseType, QuoteType>(account, side);
@@ -318,10 +331,12 @@ module sea::spot {
             fok: false,
             is_market: true,
         };
-        let order = &mut OrderEntity{
+        let order = OrderEntity{
             qty: qty,
             grid_id: 0,
             account_id: 0,
+            base_frozen: coin::zero(),
+            quote_frozen: coin::zero(),
         };
         if (to_escrow) {
             check_init_taker_escrow<BaseType, QuoteType>(account, side);
@@ -346,6 +361,9 @@ module sea::spot {
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
         let account_id = escrow::get_or_register_account_id(account_addr);
+        let grid_id = pair.n_grid + 1;
+        pair.n_grid = grid_id;
+        grid_id = (pair.pair_id << 40) | grid_id;
 
         if (sell_orders > 0)  {
             let bids = &mut pair.bids;
@@ -357,10 +375,12 @@ module sea::spot {
             let i = 0;
             let price = sell_price0;
             while (i < sell_orders) {
-                let order = &mut OrderEntity{
+                let order = OrderEntity{
                     qty: per_qty,
-                    grid_id: 0,
+                    grid_id: grid_id,
                     account_id: account_id,
+                    base_frozen: coin::zero(),
+                    quote_frozen: coin::zero(),
                 };
                 place_order(account, account_addr, SELL, from_escrow, price, pair, order);
                 price = price + delta_price;
@@ -377,10 +397,12 @@ module sea::spot {
             let i = 0;
             let price = buy_price0;
             while (i < buy_orders) {
-                let order = &mut OrderEntity{
+                let order = OrderEntity{
                     qty: per_qty,
-                    grid_id: 0,
+                    grid_id: grid_id,
                     account_id: account_id,
+                    base_frozen: coin::zero(),
+                    quote_frozen: coin::zero(),
                 };
                 place_order(account, account_addr, BUY, from_escrow, price, pair, order);
                 assert!(price > delta_price, E_GRID_PRICE_BUY);
@@ -399,19 +421,114 @@ module sea::spot {
         (block::get_current_block_height(), asks, bids)
     }
 
-    // get pair orders, both asks and bids
-    public entry fun get_pair_orders<BaseType, QuoteType, FeeRatio>():
-        (u64, vector<PriceStep>, vector<PriceStep>) acquires Pair {
+    // get pair keys, both asks and bids
+    // key = (price << 64 | order_id)
+    public entry fun get_pair_keys<BaseType, QuoteType, FeeRatio>():
+        (u64, vector<OrderKeyQty>, vector<OrderKeyQty>) acquires Pair {
         let pair = borrow_global<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
-        let asks = get_price_steps(&pair.asks);
-        let bids = get_price_steps(&pair.bids);
+        let asks = get_order_key_qty_list(&pair.asks);
+        let bids = get_order_key_qty_list(&pair.bids);
 
         (block::get_current_block_height(), asks, bids)
     }
 
+    // when cancel an order, we need order_key, not just order_id
+    // order_key = order_price << 64 | order_id
+    public entry fun cancel_order<BaseType, QuoteType, FeeRatio>(
+        account: &signer,
+        side: u8,
+        order_key: u128,
+        to_escrow: bool
+        ) acquires Pair {
+        let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+        cancel_order_by_key<BaseType, QuoteType, FeeRatio>(account, side, order_key, to_escrow, pair);
+    }
+
     // Private functions ====================================================
 
-    fun get_price_steps(tree: &RBTree<OrderEntity>): vector<PriceStep> {
+    fun incr_pair_grid_id<BaseType, QuoteType, FeeRatio>(
+        pair: &mut Pair<BaseType, QuoteType, FeeRatio>
+    ): u64 {
+        let grid_id = pair.n_grid + 1;
+        pair.n_grid = grid_id;
+        (pair.pair_id << 40) | grid_id
+    }
+
+    fun return_coin_to_account<CoinType>(
+        account: &signer,
+        account_addr: address,
+        to_escrow: bool,
+        frozen: Coin<CoinType>,
+    ) {
+        if (to_escrow) {
+            escrow::check_init_account_escrow<CoinType>(account);
+            escrow::incr_escrow_coin(account_addr, frozen);
+        } else {
+            if (!coin::is_account_registered<CoinType>(account_addr)) {
+                coin::register<CoinType>(account);
+            };
+            coin::deposit(account_addr, frozen);
+        };
+    }
+
+    fun cancel_order_by_key<BaseType, QuoteType, FeeRatio>(
+        account: &signer,
+        side: u8,
+        order_key: u128,
+        to_escrow: bool,
+        pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
+    ) {
+        let account_addr = address_of(account);
+        if (side == BUY) {
+            // frozen is quote
+            let orderbook = &mut pair.bids;
+            let pos = rbtree::rb_find(orderbook, order_key);
+            if (pos == 0) {
+                return
+            };
+            let (_, order) = rbtree::rb_remove_by_pos(orderbook, pos);
+            // quote
+            // let vol = calc_quote_vol_for_buy(order.qty, price, pair.ratio);
+            // let unfrozen = escrow::dec_escrow_coin<QuoteType>(account_addr, vol, true);
+            let OrderEntity {
+                    account_id: _,
+                    grid_id: grid_id,
+                    qty: _,
+                    base_frozen: base_frozen,
+                    quote_frozen: quote_frozen,
+                } = order;
+            return_coin_to_account<QuoteType>(account, account_addr, to_escrow, quote_frozen);
+            if (grid_id > 0 && coin::value(&base_frozen) > 0) {
+                return_coin_to_account<BaseType>(account, account_addr, to_escrow, base_frozen);
+            } else {
+                coin::destroy_zero(base_frozen);
+            }
+        } else {
+            let orderbook = &mut pair.asks;
+            let pos = rbtree::rb_find(orderbook, order_key);
+            if (pos == 0) {
+                return
+            };
+            let (_, order) = rbtree::rb_remove_by_pos(orderbook, pos);
+            let OrderEntity {
+                    account_id: _,
+                    grid_id: grid_id,
+                    qty: _,
+                    base_frozen: base_frozen,
+                    quote_frozen: quote_frozen,
+                } = order;
+            return_coin_to_account<BaseType>(account, account_addr, to_escrow, base_frozen);
+            if (grid_id > 0 && coin::value(&quote_frozen) > 0) {
+                return_coin_to_account<QuoteType>(account, account_addr, to_escrow, quote_frozen);
+            } else {
+                coin::destroy_zero(quote_frozen);
+            }
+        };
+    }
+
+    fun get_price_steps<BaseType, QuoteType>(
+        tree: &RBTree<OrderEntity<BaseType, QuoteType>>
+    ): vector<PriceStep> {
         let steps = vector::empty<PriceStep>();
 
         if (!rbtree::is_empty(tree)) {
@@ -431,7 +548,7 @@ module sea::spot {
                 };
 
                 let next_price = price_from_key(next_key);
-                let next_order = rbtree::borrow_by_pos<OrderEntity>(tree, next_pos);
+                let next_order = rbtree::borrow_by_pos<OrderEntity<BaseType, QuoteType>>(tree, next_pos);
                 let next_qty = next_order.qty;
                 if (price == next_price) {
                     qty = qty + next_qty;
@@ -451,11 +568,35 @@ module sea::spot {
         steps
     }
 
+    // when we cancel an order, we need the key, not only the order_id
+    fun get_order_key_qty_list<BaseType, QuoteType>(
+        tree: &RBTree<OrderEntity<BaseType, QuoteType>>
+    ): vector<OrderKeyQty> {
+        let orders = vector::empty<OrderKeyQty>();
+
+        if (!rbtree::is_empty(tree)) {
+            let (pos, key, item) = rbtree::get_leftmost_pos_key_val(tree);
+            let qty: u64 = item.qty;
+            while (true) {
+                vector::push_back(&mut orders, OrderKeyQty{
+                    key: key,
+                    qty: qty,
+                });
+                (pos, key) = rbtree::get_next_pos_key(tree, pos);
+                if (key == 0) {
+                    break
+                };
+            }
+        };
+        orders
+    }
+
+    // the left most key contains price
     fun get_best_price<V>(
         tree: &RBTree<V>
     ): u64 {
         let leftmmost = rbtree::get_leftmost_key(tree);
-        ((leftmmost >> 64) as u64)
+        price_from_key(leftmmost)
     }
 
     fun price_from_key(key: u128): u64 {
@@ -494,7 +635,7 @@ module sea::spot {
         taker: &signer,
         price: u64,
         opts: &PlaceOrderOpts,
-        order: &mut OrderEntity
+        order: OrderEntity<BaseType, QuoteType>
     ) acquires Pair {
         let taker_addr = address_of(taker);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
@@ -506,7 +647,7 @@ module sea::spot {
             taker,
             price,
             pair,
-            order,
+            &mut order,
             opts,
         );
 
@@ -516,7 +657,9 @@ module sea::spot {
             let taker_account_id = escrow::get_or_register_account_id(taker_addr);
             order.account_id = taker_account_id;
             place_order(taker, taker_addr, opts.side, opts.from_escrow, price, pair, order);
-        }
+        } else {
+            destroy_order(order);
+        };
     }
 
     fun place_order<BaseType, QuoteType, FeeRatio>(
@@ -526,14 +669,16 @@ module sea::spot {
         from_escrow: bool,
         price: u64,
         pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
-        order: &mut OrderEntity
+        order: OrderEntity<BaseType, QuoteType>
     ) {
         // frozen
         if (side == SELL) {
+            let qty = order.qty;
             if (from_escrow) {
-                escrow::transfer_to_frozen<BaseType>(addr, order.qty);
+                coin::merge(&mut order.base_frozen, escrow::dec_escrow_coin<BaseType>(addr, qty));
             } else {
-                escrow::deposit<BaseType>(account, order.qty, true);
+                coin::merge(&mut order.base_frozen, coin::withdraw(account, qty))
+                // escrow::deposit<BaseType>(account, order.qty, true);
             };
             // init escrow QuoteType if not exist
             escrow::check_init_account_escrow<QuoteType>(account);
@@ -542,9 +687,10 @@ module sea::spot {
             // debug::print(&pair.price_ratio);
             // debug::print(&vol);
             if (from_escrow) {
-                escrow::transfer_to_frozen<QuoteType>(addr, vol);
+                coin::merge(&mut order.quote_frozen, escrow::dec_escrow_coin<QuoteType>(addr, vol));
             } else {
-                escrow::deposit<QuoteType>(account, vol, true);
+                coin::merge(&mut order.quote_frozen, coin::withdraw(account, vol));
+                // escrow::deposit<QuoteType>(account, vol, true);
             };
             // init escrow BaseType if not exist
             escrow::check_init_account_escrow<BaseType>(account);
@@ -553,7 +699,7 @@ module sea::spot {
         let order_id = generate_order_id(pair);
         let orderbook = if (side == BUY) &mut pair.bids else &mut pair.asks;
         let key: u128 = generate_key(price, order_id);
-        rbtree::rb_insert<OrderEntity>(orderbook, key, *order);
+        rbtree::rb_insert<OrderEntity<BaseType, QuoteType>>(orderbook, key, order);
     }
 
     fun generate_key(price: u64, order_id: u64): u128 {
@@ -574,7 +720,7 @@ module sea::spot {
         taker: &signer,
         price: u64,
         pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
-        taker_order: &mut OrderEntity,
+        taker_order: &mut OrderEntity<BaseType, QuoteType>,
         taker_opts: &PlaceOrderOpts,
     ): bool {
         // does the taker order is total filled
@@ -603,13 +749,10 @@ module sea::spot {
                 // debug::print(&10000000000001);
                 // if (order.qty == taker_order.qty) completed = true;
             };
-            //  else {
-            //     completed = true;
-            //     // if the last maker order cannot match anymore
-            // };
+
             taker_order.qty = taker_order.qty - match_qty;
             order.qty = order.qty - match_qty;
-            debug::print(&order.qty);
+            // debug::print(&order.qty);
             let (quote_vol, fee_amt) = calc_quote_vol(taker_side, match_qty, maker_price, price_ratio, fee_ratio);
             let (fee_maker, fee_plat) = fee::get_maker_fee_shares(fee_amt, order.grid_id > 0);
 
@@ -618,7 +761,7 @@ module sea::spot {
                 &mut pair.quote_vault,
                 taker,
                 taker_opts,
-                order.account_id,
+                order,
                 match_qty,
                 quote_vol,
                 fee_plat,
@@ -627,7 +770,7 @@ module sea::spot {
                 // debug::print(&10000000000002);
                 // debug::print(&pos);
                 let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
-                let OrderEntity {qty: _, grid_id: _, account_id: _} = pop_order;
+                destroy_order<BaseType, QuoteType>(pop_order);
             };
             if (taker_order.qty == 0) {
                 break
@@ -635,6 +778,30 @@ module sea::spot {
         };
 
         taker_order.qty == 0
+    }
+
+    fun destroy_order<BaseType, QuoteType>(
+        order: OrderEntity<BaseType, QuoteType>
+    ) {
+        let OrderEntity {
+            qty: _,
+            grid_id: _,
+            account_id: account_id,
+            base_frozen: base_frozen,
+            quote_frozen: quote_frozen,
+        } = order;
+        if (coin::value(&base_frozen) > 0) {
+            let addr = escrow::get_account_addr_by_id(account_id);
+            escrow::incr_escrow_coin<BaseType>(addr, base_frozen);
+        } else {
+            coin::destroy_zero(base_frozen);
+        };
+        if (coin::value(&quote_frozen) > 0) {
+            let addr = escrow::get_account_addr_by_id(account_id);
+            escrow::incr_escrow_coin<QuoteType>(addr, quote_frozen);
+        } else {
+            coin::destroy_zero(quote_frozen);
+        };
     }
 
     fun calc_quote_vol_for_buy(
@@ -682,69 +849,76 @@ module sea::spot {
         pair_quote_vault: &mut Coin<QuoteType>,
         taker: &signer,
         taker_opts: &PlaceOrderOpts,
-        maker_id: u64,
+        maker_order: &mut OrderEntity<BaseType, QuoteType>,
         base_qty: u64,
         quote_vol: u64,
         fee_plat_amt: u64,
         fee_maker_amt: u64,
     ) {
-        let maker_addr = escrow::get_account_addr_by_id(maker_id);
+        let maker_addr = escrow::get_account_addr_by_id(maker_order.account_id);
         let taker_addr = taker_opts.addr;
 
         if (taker_opts.side == BUY) {
             // taker got base coin
-            let to_taker = escrow::dec_escrow_coin<BaseType>(maker_addr, base_qty, true);
+            // let to_taker = escrow::dec_escrow_coin<BaseType>(maker_addr, base_qty);
+            let to_taker = coin::extract<BaseType>(&mut maker_order.base_frozen, base_qty);
             let maker_fee_prop = coin::extract<BaseType>(&mut to_taker, fee_maker_amt);
-            escrow::incr_escrow_coin<BaseType>(maker_addr, maker_fee_prop, false);
+            escrow::incr_escrow_coin<BaseType>(maker_addr, maker_fee_prop);
             if (fee_plat_amt > 0) {
                 // platform vault
                 let to_plat = coin::extract(&mut to_taker, fee_plat_amt);
                 coin::merge(pair_base_vault, to_plat);
             };
             if (taker_opts.to_escrow) {
-                escrow::incr_escrow_coin<BaseType>(taker_addr, to_taker, false);
+                escrow::incr_escrow_coin<BaseType>(taker_addr, to_taker);
             } else {
                 // send to taker directly
                 coin::deposit(taker_addr, to_taker);
             };
             // maker got quote coin
             let quote = if (taker_opts.from_escrow) {
-                    escrow::dec_escrow_coin<QuoteType>(taker_addr, quote_vol, false)
+                    escrow::dec_escrow_coin<QuoteType>(taker_addr, quote_vol)
                 } else {
                     coin::withdraw<QuoteType>(taker, quote_vol)
                 };
-            escrow::incr_escrow_coin<QuoteType>(maker_addr, quote, false);
+            // if the maker is grid
+            if (maker_order.grid_id > 0) {
+                coin::merge(&mut maker_order.quote_frozen, quote);
+            } else {
+                escrow::incr_escrow_coin<QuoteType>(maker_addr, quote);
+            }
         } else {
             // taker got quote coin
-            let to_taker = escrow::dec_escrow_coin<QuoteType>(maker_addr, quote_vol, true);
+            // let to_taker = escrow::dec_escrow_coin<QuoteType>(maker_addr, quote_vol);
+            let to_taker = coin::extract<QuoteType>(&mut maker_order.quote_frozen, quote_vol);
             let maker_fee_prop = coin::extract<QuoteType>(&mut to_taker, fee_maker_amt);
-            escrow::incr_escrow_coin<QuoteType>(maker_addr, maker_fee_prop, false);
+            escrow::incr_escrow_coin<QuoteType>(maker_addr, maker_fee_prop);
             if (fee_plat_amt > 0) {
                 // platform vault
                 let to_plat = coin::extract(&mut to_taker, fee_plat_amt);
                 coin::merge(pair_quote_vault, to_plat);
             };
             if (taker_opts.to_escrow) {
-                escrow::incr_escrow_coin<QuoteType>(taker_addr, to_taker, false);
+                escrow::incr_escrow_coin<QuoteType>(taker_addr, to_taker);
             } else {
                 // send to taker directly
                 coin::deposit(taker_addr, to_taker);
             };
             // maker got base coin
             let base = if (taker_opts.from_escrow) {
-                    escrow::dec_escrow_coin<BaseType>(taker_addr, base_qty, false)
+                    escrow::dec_escrow_coin<BaseType>(taker_addr, base_qty)
                 } else {
                     coin::withdraw<BaseType>(taker, base_qty)
                 };
-            escrow::incr_escrow_coin<BaseType>(maker_addr, base, false);
+            // if the maker is grid
+            if (maker_order.grid_id > 0) {
+                coin::merge(&mut maker_order.base_frozen, base);
+            } else {
+                escrow::incr_escrow_coin<BaseType>(maker_addr, base);
+            }
         }
     }
 
-    fun swap_coin(
-        _step: &mut OrderEntity,
-        ) {
-
-    }
 
     // Test-only functions ====================================================
     #[test_only]
@@ -889,9 +1063,9 @@ module sea::spot {
         let avail = escrow::escrow_available<CoinType>(addr);
         // debug::print(&avail);
         assert!(avail == escrow_avail, 101);
-        let freeze = escrow::escrow_frozen<CoinType>(addr);
+        // let freeze = escrow::escrow_frozen<CoinType>(addr);
         // debug::print(&freeze);
-        assert!(freeze == escrow_frozen, 102);
+        // assert!(freeze == escrow_frozen, 102);
         // let sep = string::utf8(b"------------");
         // debug::print(&sep);
     }

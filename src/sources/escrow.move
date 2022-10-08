@@ -40,7 +40,7 @@ module sea::escrow {
     // store in account
     struct AccountEscrow<phantom CoinType> has key {
         // key is coin_id
-        frozen: Coin<CoinType>,
+        // frozen: Coin<CoinType>,
         available: Coin<CoinType>,
     }
 
@@ -79,15 +79,15 @@ module sea::escrow {
     }
 
     // get account escrow coin available
-    public fun escrow_frozen<CoinType>(
-        addr: address
-    ): u64 acquires AccountEscrow {
-        if (!exists<AccountEscrow<CoinType>>(addr)) {
-            return 0
-        };
-        let ref = borrow_global<AccountEscrow<CoinType>>(addr);
-        coin::value(&ref.frozen)
-    }
+    // public fun escrow_frozen<CoinType>(
+    //     addr: address
+    // ): u64 acquires AccountEscrow {
+    //     if (!exists<AccountEscrow<CoinType>>(addr)) {
+    //         return 0
+    //     };
+    //     let ref = borrow_global<AccountEscrow<CoinType>>(addr);
+    //     coin::value(&ref.frozen)
+    // }
 
     public fun check_init_account_escrow<CoinType>(
         account: &signer
@@ -97,7 +97,7 @@ module sea::escrow {
         if (!exists<AccountEscrow<CoinType>>(account_addr)) {
             move_to(account, AccountEscrow<CoinType>{
                 available: coin::zero(),
-                frozen: coin::zero(),
+                // frozen: coin::zero(),
             });
         }
     }
@@ -105,28 +105,28 @@ module sea::escrow {
     public fun deposit<CoinType>(
         account: &signer,
         amount: u64,
-        is_frozen: bool
+        // is_frozen: bool
     ) acquires AccountEscrow {
         let account_addr = address_of(account);
         if (exists<AccountEscrow<CoinType>>(account_addr)) {
             let current = borrow_global_mut<AccountEscrow<CoinType>>(account_addr);
-            if (is_frozen) {
-                coin::merge(&mut current.frozen, coin::withdraw(account, amount));
-            } else {
+            // if (is_frozen) {
+            //     coin::merge(&mut current.frozen, coin::withdraw(account, amount));
+            // } else {
                 coin::merge(&mut current.available, coin::withdraw(account, amount));
-            }
+            // }
         } else {
-            if (is_frozen) {
-                move_to(account, AccountEscrow<CoinType>{
-                    available: coin::zero(),
-                    frozen: coin::withdraw(account, amount),
-                });
-            } else {
+            // if (is_frozen) {
+            //     move_to(account, AccountEscrow<CoinType>{
+            //         available: coin::zero(),
+            //         frozen: coin::withdraw(account, amount),
+            //     });
+            // } else {
                 move_to(account, AccountEscrow<CoinType>{
                     available: coin::withdraw(account, amount),
-                    frozen: coin::zero(),
+                    // frozen: coin::zero(),
                 });
-            }
+            // }
         };
         // if (table::contains(&escrow_ref.assets_map, asset_id)) {
         //     let asset_ref_mut = table::borrow_mut(&mut escrow_ref.assets_map, asset_id);
@@ -218,48 +218,48 @@ module sea::escrow {
     // available -> frozen
     // available -= amount
     // frozen += amount
-    public(friend) fun transfer_to_frozen<CoinType>(
-        addr: address,
-        amount: u64,
-    ) acquires AccountEscrow {
-        let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
-        // assert!();
-        coin::merge(&mut escrow_ref.frozen, coin::extract(&mut escrow_ref.available, amount))
-    }
+    // public(friend) fun transfer_to_frozen<CoinType>(
+    //     addr: address,
+    //     amount: u64,
+    // ) acquires AccountEscrow {
+    //     let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
+    //     // assert!();
+    //     coin::merge(&mut escrow_ref.frozen, coin::extract(&mut escrow_ref.available, amount))
+    // }
 
-    public(friend) fun transfer_from_frozen<CoinType>(
-        addr: address,
-        amount: u64,
-    ) acquires AccountEscrow {
-        let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
-        coin::merge(&mut escrow_ref.available, coin::extract(&mut escrow_ref.frozen, amount))
-    }
+    // public(friend) fun transfer_from_frozen<CoinType>(
+    //     addr: address,
+    //     amount: u64,
+    // ) acquires AccountEscrow {
+    //     let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
+    //     coin::merge(&mut escrow_ref.available, coin::extract(&mut escrow_ref.frozen, amount))
+    // }
 
     // increase the escrow account coin
     public(friend) fun incr_escrow_coin<CoinType>(
         addr: address,
         amt: Coin<CoinType>,
-        is_frozen: bool
+        // is_frozen: bool
     ) acquires AccountEscrow {
         let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
-        if (is_frozen) {
-            coin::merge(&mut escrow_ref.frozen, amt);
-        } else {
+        // if (is_frozen) {
+        //     coin::merge(&mut escrow_ref.frozen, amt);
+        // } else {
             coin::merge(&mut escrow_ref.available, amt);
-        }
+        // }
     }
 
     public(friend) fun dec_escrow_coin<CoinType>(
         addr: address,
         amt: u64,
-        is_frozen: bool
+        // is_frozen: bool
     ): Coin<CoinType> acquires AccountEscrow {
         let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
-        if (is_frozen) {
-            coin::extract<CoinType>(&mut escrow_ref.frozen, amt)
-        } else {
+        // if (is_frozen) {
+        //     coin::extract<CoinType>(&mut escrow_ref.frozen, amt)
+        // } else {
             coin::extract<CoinType>(&mut escrow_ref.available, amt)
-        }
+        // }
     }
 
     public(friend) fun get_or_register_coin_id<CoinType>(
