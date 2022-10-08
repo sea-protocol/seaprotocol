@@ -54,6 +54,7 @@ module sea::spot {
 
     struct Pair<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
         n_order: u64,
+        n_grid: u64,
         fee_ratio: u64,
         base_id: u64,
         quote_id: u64,
@@ -88,6 +89,7 @@ module sea::spot {
     struct PriceStep has copy, drop {
         price: u64,
         qty: u64,
+        orders: u64,
     }
 
     // struct SpotMarket<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
@@ -130,6 +132,9 @@ module sea::spot {
     const E_PRICE_TOO_LOW:       u64 = 13;
     const E_PRICE_TOO_HIGH:      u64 = 14;
     const E_INITIALIZED:         u64 = 15;
+    const E_INVALID_GRID_PRICE:  u64 = 16;
+    const E_GRID_PRICE_BUY:      u64 = 17;
+    const E_GRID_ORDER_COUNT:    u64 = 18;
 
     // Public functions ====================================================
 
@@ -171,7 +176,7 @@ module sea::spot {
         move_to(account, QuoteConfig<QuoteType>{
             quote_id: quote_id,
             tick_size: tick_size,
-            min_notional: min_notional,
+            min_notional: min_notional,     
             // quote: quote,
         })
         // todo event
@@ -206,6 +211,7 @@ module sea::spot {
         assert!(ok, E_PAIR_PRICE_INVALID);
         let pair: Pair<BaseType, QuoteType, FeeRatio> = Pair{
             n_order: 0,
+            n_grid: 0,
             fee_ratio: fee_ratio,
             base_id: base_id,
             quote_id: quote_id,
@@ -254,6 +260,7 @@ module sea::spot {
             grid_id: 0,
             account_id: escrow::get_or_register_account_id(account_addr),
         };
+        check_init_taker_escrow<BaseType, QuoteType>(account, side);
         place_order(account, account_addr, side, from_escrow, price, pair, order)
     }
 
@@ -323,17 +330,77 @@ module sea::spot {
         match<BaseType, QuoteType, FeeRatio>(account, 0, opts, order);
     }
 
-    // public entry fun place_grid_order<BaseType, QuoteType, FeeRatio>(
-    //     account: &signer,
-    //     price: u64,
-    //     per_qty: u64,
-    //     from_escrow: bool,
-    // ) acquires Pair {
+    public entry fun place_grid_order<BaseType, QuoteType, FeeRatio>(
+        account: &signer,
+        buy_price0: u64,
+        sell_price0: u64,
+        buy_orders: u64,
+        sell_orders: u64,
+        per_qty: u64,
+        delta_price: u64,
+        from_escrow: bool,
+    ) acquires Pair {
+        assert!(buy_price0 < sell_price0, E_INVALID_GRID_PRICE);
+        assert!(buy_orders + sell_orders >= 10, E_INVALID_GRID_PRICE);
+        // 
+        let account_addr = address_of(account);
+        let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+        let account_id = escrow::get_or_register_account_id(account_addr);
 
-    // }
+        if (sell_orders > 0)  {
+            let bids = &mut pair.bids;
+            if (!rbtree::is_empty(bids)) {
+                let bid0 = get_best_price(bids);
+                assert!(sell_price0 >= bid0, E_PRICE_TOO_LOW);
+            };
+            check_init_taker_escrow<BaseType, QuoteType>(account, SELL);
+            let i = 0;
+            let price = sell_price0;
+            while (i < sell_orders) {
+                let order = &mut OrderEntity{
+                    qty: per_qty,
+                    grid_id: 0,
+                    account_id: account_id,
+                };
+                place_order(account, account_addr, SELL, from_escrow, price, pair, order);
+                price = price + delta_price;
+            }
+        };
+        if (buy_orders > 0) {
+            let asks = &mut pair.asks;
+            if (!rbtree::is_empty(asks)) {
+                let ask0 = get_best_price(asks);
+                // debug::print(&ask0);
+                assert!(buy_price0 <= ask0, E_PRICE_TOO_HIGH);
+            };
+            check_init_taker_escrow<BaseType, QuoteType>(account, BUY);
+            let i = 0;
+            let price = buy_price0;
+            while (i < buy_orders) {
+                let order = &mut OrderEntity{
+                    qty: per_qty,
+                    grid_id: 0,
+                    account_id: account_id,
+                };
+                place_order(account, account_addr, BUY, from_escrow, price, pair, order);
+                assert!(price > delta_price, E_GRID_PRICE_BUY);
+                price = price - delta_price;
+            }
+        };
+    }
 
     // get pair prices, both asks and bids
     public entry fun get_pair_price_steps<BaseType, QuoteType, FeeRatio>():
+        (u64, vector<PriceStep>, vector<PriceStep>) acquires Pair {
+        let pair = borrow_global<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+        let asks = get_price_steps(&pair.asks);
+        let bids = get_price_steps(&pair.bids);
+
+        (block::get_current_block_height(), asks, bids)
+    }
+
+    // get pair orders, both asks and bids
+    public entry fun get_pair_orders<BaseType, QuoteType, FeeRatio>():
         (u64, vector<PriceStep>, vector<PriceStep>) acquires Pair {
         let pair = borrow_global<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
         let asks = get_price_steps(&pair.asks);
@@ -351,12 +418,14 @@ module sea::spot {
             let (pos, key, item) = rbtree::get_leftmost_pos_key_val(tree);
             let price = price_from_key(key);
             let qty: u64 = item.qty;
+            let orders: u64 = 1;
             while (true) {
                 let (next_pos, next_key) = rbtree::get_next_pos_key(tree, pos);
                 if (next_key == 0) {
                     vector::push_back(&mut steps, PriceStep{
                         price: price,
                         qty: qty,
+                        orders: orders,
                     });
                     break
                 };
@@ -366,12 +435,15 @@ module sea::spot {
                 let next_qty = next_order.qty;
                 if (price == next_price) {
                     qty = qty + next_qty;
+                    orders = orders + 1;
                 } else {
                     vector::push_back(&mut steps, PriceStep{
                         price: price,
                         qty: qty,
+                        orders: orders,
                     });
                     qty = next_qty; //
+                    orders = 1;
                 };
                 pos = next_pos;
             }
