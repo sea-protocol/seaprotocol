@@ -31,8 +31,8 @@ module sea::spot {
     struct PlaceOrderOpts has copy, drop {
         addr: address,
         side: u8,
-        from_escrow: bool,
-        to_escrow: bool,
+        // from_escrow: bool,
+        // to_escrow: bool,
         post_only: bool,
         ioc: bool,
         fok: bool,
@@ -245,7 +245,6 @@ module sea::spot {
         side: u8,
         price: u64,
         qty: u64,
-        from_escrow: bool,
     ) acquires Pair {
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
@@ -272,7 +271,7 @@ module sea::spot {
             quote_frozen: coin::zero(),
         };
         check_init_taker_escrow<BaseType, QuoteType>(account, side);
-        place_order(account, account_addr, side, from_escrow, price, pair, order)
+        place_order(account, side, price, pair, order)
     }
 
     public entry fun place_limit_order<BaseType, QuoteType, FeeRatio>(
@@ -282,8 +281,8 @@ module sea::spot {
         qty: u64,
         ioc: bool,
         fok: bool,
-        from_escrow: bool,
-        to_escrow: bool,
+        // from_escrow: bool,
+        // to_escrow: bool,
     ) acquires Pair {
         if (fok) {
             // TODO check this order can be filled
@@ -292,8 +291,8 @@ module sea::spot {
         let opts = &PlaceOrderOpts {
             addr: taker_addr,
             side: side,
-            from_escrow: from_escrow,
-            to_escrow: to_escrow,
+            // from_escrow: false,
+            // to_escrow: to_escrow,
             post_only: false,
             ioc: ioc,
             fok: fok,
@@ -306,9 +305,9 @@ module sea::spot {
             base_frozen: coin::zero(),
             quote_frozen: coin::zero(),
         };
-        if (to_escrow) {
-            check_init_taker_escrow<BaseType, QuoteType>(account, side);
-        };
+        // if (to_escrow) {
+        //     check_init_taker_escrow<BaseType, QuoteType>(account, side);
+        // };
         // we don't check whether the account has enough asset just abort
         match<BaseType, QuoteType, FeeRatio>(account, price, opts, order);
     }
@@ -317,15 +316,15 @@ module sea::spot {
         account: &signer,
         side: u8,
         qty: u64,
-        from_escrow: bool,
-        to_escrow: bool,
+        // from_escrow: bool,
+        // to_escrow: bool,
     ) acquires Pair {
         let taker_addr = address_of(account);
         let opts = &PlaceOrderOpts {
             addr: taker_addr,
             side: side,
-            from_escrow: from_escrow,
-            to_escrow: to_escrow,
+            // from_escrow: from_escrow,
+            // to_escrow: to_escrow,
             post_only: false,
             ioc: false,
             fok: false,
@@ -338,9 +337,9 @@ module sea::spot {
             base_frozen: coin::zero(),
             quote_frozen: coin::zero(),
         };
-        if (to_escrow) {
-            check_init_taker_escrow<BaseType, QuoteType>(account, side);
-        };
+        // if (to_escrow) {
+        //     check_init_taker_escrow<BaseType, QuoteType>(account, side);
+        // };
         // we don't check whether the account has enough asset just abort
         match<BaseType, QuoteType, FeeRatio>(account, 0, opts, order);
     }
@@ -353,7 +352,7 @@ module sea::spot {
         sell_orders: u64,
         per_qty: u64,
         delta_price: u64,
-        from_escrow: bool,
+        // from_escrow: bool,
     ) acquires Pair {
         assert!(buy_price0 < sell_price0, E_INVALID_GRID_PRICE);
         assert!(buy_orders + sell_orders >= 10, E_INVALID_GRID_PRICE);
@@ -382,7 +381,7 @@ module sea::spot {
                     base_frozen: coin::zero(),
                     quote_frozen: coin::zero(),
                 };
-                place_order(account, account_addr, SELL, from_escrow, price, pair, order);
+                place_order(account, SELL, price, pair, order);
                 price = price + delta_price;
             }
         };
@@ -404,7 +403,7 @@ module sea::spot {
                     base_frozen: coin::zero(),
                     quote_frozen: coin::zero(),
                 };
-                place_order(account, account_addr, BUY, from_escrow, price, pair, order);
+                place_order(account, BUY, price, pair, order);
                 assert!(price > delta_price, E_GRID_PRICE_BUY);
                 price = price - delta_price;
             }
@@ -656,7 +655,7 @@ module sea::spot {
             // place order to orderbook
             let taker_account_id = escrow::get_or_register_account_id(taker_addr);
             order.account_id = taker_account_id;
-            place_order(taker, taker_addr, opts.side, opts.from_escrow, price, pair, order);
+            place_order(taker, opts.side, price, pair, order);
         } else {
             destroy_order(order);
         };
@@ -664,9 +663,8 @@ module sea::spot {
 
     fun place_order<BaseType, QuoteType, FeeRatio>(
         account: &signer,
-        addr: address,
+        // addr: address,
         side: u8,
-        from_escrow: bool,
         price: u64,
         pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
         order: OrderEntity<BaseType, QuoteType>
@@ -674,24 +672,24 @@ module sea::spot {
         // frozen
         if (side == SELL) {
             let qty = order.qty;
-            if (from_escrow) {
-                coin::merge(&mut order.base_frozen, escrow::dec_escrow_coin<BaseType>(addr, qty));
-            } else {
-                coin::merge(&mut order.base_frozen, coin::withdraw(account, qty))
+            // if (from_escrow) {
+            //     coin::merge(&mut order.base_frozen, escrow::dec_escrow_coin<BaseType>(addr, qty));
+            // } else {
+                coin::merge(&mut order.base_frozen, coin::withdraw(account, qty));
                 // escrow::deposit<BaseType>(account, order.qty, true);
-            };
+            // };
             // init escrow QuoteType if not exist
             escrow::check_init_account_escrow<QuoteType>(account);
         } else {
             let vol = calc_quote_vol_for_buy(order.qty, price, pair.price_ratio);
             // debug::print(&pair.price_ratio);
             // debug::print(&vol);
-            if (from_escrow) {
-                coin::merge(&mut order.quote_frozen, escrow::dec_escrow_coin<QuoteType>(addr, vol));
-            } else {
+            // if (from_escrow) {
+            //     coin::merge(&mut order.quote_frozen, escrow::dec_escrow_coin<QuoteType>(addr, vol));
+            // } else {
                 coin::merge(&mut order.quote_frozen, coin::withdraw(account, vol));
                 // escrow::deposit<QuoteType>(account, vol, true);
-            };
+            // };
             // init escrow BaseType if not exist
             escrow::check_init_account_escrow<BaseType>(account);
         };
@@ -769,6 +767,10 @@ module sea::spot {
             if (remove_order) {
                 // debug::print(&10000000000002);
                 // debug::print(&pos);
+                // TODO if is grid order, flip it
+                if (order.grid_id > 0) {
+                    flip_grid_order();
+                };
                 let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
                 destroy_order<BaseType, QuoteType>(pop_order);
             };
@@ -779,6 +781,8 @@ module sea::spot {
 
         taker_order.qty == 0
     }
+
+    fun flip_grid_order() {}
 
     fun destroy_order<BaseType, QuoteType>(
         order: OrderEntity<BaseType, QuoteType>
@@ -869,18 +873,19 @@ module sea::spot {
                 let to_plat = coin::extract(&mut to_taker, fee_plat_amt);
                 coin::merge(pair_base_vault, to_plat);
             };
-            if (taker_opts.to_escrow) {
-                escrow::incr_escrow_coin<BaseType>(taker_addr, to_taker);
-            } else {
+            // if (taker_opts.to_escrow) {
+            //     escrow::incr_escrow_coin<BaseType>(taker_addr, to_taker);
+            // } else {
                 // send to taker directly
                 coin::deposit(taker_addr, to_taker);
-            };
+            // };
             // maker got quote coin
-            let quote = if (taker_opts.from_escrow) {
-                    escrow::dec_escrow_coin<QuoteType>(taker_addr, quote_vol)
-                } else {
-                    coin::withdraw<QuoteType>(taker, quote_vol)
-                };
+            let quote = coin::withdraw<QuoteType>(taker, quote_vol);
+            // if (taker_opts.from_escrow) {
+            //         escrow::dec_escrow_coin<QuoteType>(taker_addr, quote_vol)
+            //     } else {
+            //         coin::withdraw<QuoteType>(taker, quote_vol)
+            //     };
             // if the maker is grid
             if (maker_order.grid_id > 0) {
                 coin::merge(&mut maker_order.quote_frozen, quote);
@@ -898,18 +903,19 @@ module sea::spot {
                 let to_plat = coin::extract(&mut to_taker, fee_plat_amt);
                 coin::merge(pair_quote_vault, to_plat);
             };
-            if (taker_opts.to_escrow) {
-                escrow::incr_escrow_coin<QuoteType>(taker_addr, to_taker);
-            } else {
+            // if (taker_opts.to_escrow) {
+            //     escrow::incr_escrow_coin<QuoteType>(taker_addr, to_taker);
+            // } else {
                 // send to taker directly
                 coin::deposit(taker_addr, to_taker);
-            };
+            // };
             // maker got base coin
-            let base = if (taker_opts.from_escrow) {
-                    escrow::dec_escrow_coin<BaseType>(taker_addr, base_qty)
-                } else {
-                    coin::withdraw<BaseType>(taker, base_qty)
-                };
+            let base = coin::withdraw<BaseType>(taker, base_qty);
+            // if (taker_opts.from_escrow) {
+            //         escrow::dec_escrow_coin<BaseType>(taker_addr, base_qty)
+            //     } else {
+            //         coin::withdraw<BaseType>(taker, base_qty)
+            //     };
             // if the maker is grid
             if (maker_order.grid_id > 0) {
                 coin::merge(&mut maker_order.base_frozen, base);
@@ -918,7 +924,6 @@ module sea::spot {
             }
         }
     }
-
 
     // Test-only functions ====================================================
     #[test_only]
@@ -1141,7 +1146,7 @@ module sea::spot {
     ) acquires NPair, Pair {
         let price_ratio = test_register_pair(sea_admin, user1, user2, user3);
 
-        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000, false, false, false, true);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000, false, false);
         // check the user's asset OK
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 0, 0);
         let vol = calc_quote_vol_for_buy(150130000000, 1500000, price_ratio);
@@ -1154,7 +1159,7 @@ module sea::spot {
         assert!(step0.price == 150130000000, 2);
         assert!(step0.qty == 1500000, 2);
         
-        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, SELL, 150130000000, 1000000, false, false, false, true);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, SELL, 150130000000, 1000000, false, false);
         // check maker user1 assets
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 1000000, 0);
         let vol1 = calc_quote_vol_for_buy(150130000000, 1000000, price_ratio);
@@ -1173,7 +1178,7 @@ module sea::spot {
         assert!(step0.price == 150130000000, 2);
         assert!(step0.qty == 500000, 2);
 
-        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user3, SELL, 150130000000, 500000, false, false, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user3, SELL, 150130000000, 500000, false, false);
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 1500000, 0);
         let vol2 = calc_quote_vol_for_buy(150130000000, 500000, price_ratio);
         let fee2 = vol2 * 200/1000000;
@@ -1205,7 +1210,7 @@ module sea::spot {
     ) acquires NPair, Pair {
         let price_ratio = test_register_pair(sea_admin, user1, user2, user3);
 
-        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false, false, false, true);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false, false);
         // check the user's asset OK
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000, 0, 1500000);
         // let vol = calc_quote_vol_for_buy(150130000000, 1500000, price_ratio);
@@ -1217,7 +1222,7 @@ module sea::spot {
         assert!(ask0.qty == 1500000, 1);
         assert!(vector::length(&bids) == 0, 1);
         
-        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, BUY, 150130000000, 1000000, false, false, false, true);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, BUY, 150130000000, 1000000, false, false);
         // check maker user1 assets
         let fee1 = 1000000 * 200/1000000;
         let fee1_maker = fee1 * 400/1000;
@@ -1232,7 +1237,7 @@ module sea::spot {
         assert!(vector::length(&asks) == 1, 0);
         assert!(vector::length(&bids) == 0, 1);
 
-        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user3, BUY, 150230000000, 500000, false, false, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user3, BUY, 150230000000, 500000, false, false);
         let fee2 = 500000 * 200/1000000;
         let fee2_maker = fee2 * 400/1000;
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000, fee1_maker+fee2_maker, 0);
@@ -1261,7 +1266,7 @@ module sea::spot {
     ) acquires NPair, Pair {
         let price_ratio = test_register_pair(sea_admin, user1, user2, user3);
 
-        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false, false, false, true);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false, false);
         // check the user's asset OK
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000, 0, 1500000);
         // let vol = calc_quote_vol_for_buy(150130000000, 1500000, price_ratio);
@@ -1273,7 +1278,7 @@ module sea::spot {
         assert!(ask0.qty == 1500000, 1);
         assert!(vector::length(&bids) == 0, 1);
         
-        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, BUY, 150130000000, 1000000, false, false, false, true);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, BUY, 150130000000, 1000000, false, false);
         // check maker user1 assets
         let fee1 = 1000000 * 200/1000000;
         let fee1_maker = fee1 * 400/1000;
@@ -1288,7 +1293,7 @@ module sea::spot {
         assert!(vector::length(&asks) == 1, 0);
         assert!(vector::length(&bids) == 0, 1);
 
-        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user3, BUY, 150230000000, 500010, false, false, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user3, BUY, 150230000000, 500010, false, false);
         let fee2 = 500000 * 200/1000000;
         let fee2_maker = fee2 * 400/1000;
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000, fee1_maker+fee2_maker, 0);
@@ -1322,8 +1327,8 @@ module sea::spot {
     ) acquires NPair, Pair {
         test_register_pair(sea_admin, user1, user2, user3);
 
-        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000, false);
-        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false);
+        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000);
+        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000);
     }
 
     #[test(
@@ -1341,8 +1346,8 @@ module sea::spot {
     ) acquires NPair, Pair {
         test_register_pair(sea_admin, user1, user2, user3);
 
-        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000, false);
-        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150100000000, 1500000, false);
+        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000);
+        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150100000000, 1500000);
     }
 
     #[test(
@@ -1360,7 +1365,7 @@ module sea::spot {
     ) acquires NPair, Pair {
         test_register_pair(sea_admin, user1, user2, user3);
 
-        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false);
-        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150200000000, 1500000, false);
+        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000);
+        place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150200000000, 1500000);
     }
 }
