@@ -15,7 +15,7 @@ module sea::spot {
     // use std::debug;
     use aptos_framework::coin::{Self, Coin};
     use aptos_framework::block;
-    // use aptos_std::table::{Self, Table};
+    use aptos_std::table::{Self, Table};
     // use aptos_std::type_info::{Self, TypeInfo};
     // use aptos_framework::account::{Self, SignerCapability};
     use sea::rbtree::{Self, RBTree};
@@ -101,6 +101,13 @@ module sea::spot {
         qty: u64,
     }
 
+    struct GridConfig has copy, drop, store {
+        delta_price: u64
+    }
+
+    struct AccountGrids has key {
+        grid_map: Table<u64, GridConfig>,
+    }
     // struct SpotMarket<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
     //     fee: u64,
     //     n_pair: u64,
@@ -283,7 +290,7 @@ module sea::spot {
         fok: bool,
         // from_escrow: bool,
         // to_escrow: bool,
-    ) acquires Pair {
+    ) acquires Pair, AccountGrids {
         if (fok) {
             // TODO check this order can be filled
         };
@@ -318,7 +325,7 @@ module sea::spot {
         qty: u64,
         // from_escrow: bool,
         // to_escrow: bool,
-    ) acquires Pair {
+    ) acquires Pair, AccountGrids {
         let taker_addr = address_of(account);
         let opts = &PlaceOrderOpts {
             addr: taker_addr,
@@ -353,7 +360,7 @@ module sea::spot {
         per_qty: u64,
         delta_price: u64,
         // from_escrow: bool,
-    ) acquires Pair {
+    ) acquires Pair, AccountGrids {
         assert!(buy_price0 < sell_price0, E_INVALID_GRID_PRICE);
         assert!(buy_orders + sell_orders >= 10, E_INVALID_GRID_PRICE);
         // 
@@ -363,6 +370,14 @@ module sea::spot {
         let grid_id = pair.n_grid + 1;
         pair.n_grid = grid_id;
         grid_id = (pair.pair_id << 40) | grid_id;
+        if (!exists<AccountGrids>(account_addr)) {
+            let map = table::new<u64, GridConfig>();
+            table::add(&mut map, grid_id, GridConfig{ delta_price: delta_price });
+            move_to(account, AccountGrids{ grid_map: map });
+        } else {
+            let grids = borrow_global_mut<AccountGrids>(account_addr);
+            table::add(&mut grids.grid_map, grid_id, GridConfig{ delta_price: delta_price });
+        };
 
         if (sell_orders > 0)  {
             let bids = &mut pair.bids;
@@ -635,7 +650,7 @@ module sea::spot {
         price: u64,
         opts: &PlaceOrderOpts,
         order: OrderEntity<BaseType, QuoteType>
-    ) acquires Pair {
+    ) acquires Pair, AccountGrids {
         let taker_addr = address_of(taker);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
 
@@ -720,13 +735,15 @@ module sea::spot {
         pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
         taker_order: &mut OrderEntity<BaseType, QuoteType>,
         taker_opts: &PlaceOrderOpts,
-    ): bool {
+    ): bool acquires AccountGrids {
         // does the taker order is total filled
         // let completed = false;
         let fee_ratio = pair.fee_ratio;
         let price_ratio = pair.price_ratio;
         let taker_side = taker_opts.side;
-        let orderbook = if (taker_side == BUY) &mut pair.asks else &mut pair.bids;
+        let (orderbook, peer_tree) = if (taker_side == BUY) {
+            (&mut pair.asks, &mut pair.bids)
+            } else { (&mut pair.bids, &mut pair.asks )};
 
         while (!rbtree::is_empty(orderbook)) {
             let (pos, key, order) = rbtree::borrow_leftmost_keyval_mut(orderbook);
@@ -767,12 +784,15 @@ module sea::spot {
             if (remove_order) {
                 // debug::print(&10000000000002);
                 // debug::print(&pos);
-                // TODO if is grid order, flip it
-                if (order.grid_id > 0) {
-                    flip_grid_order();
-                };
                 let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
-                destroy_order<BaseType, QuoteType>(pop_order);
+                // TODO if is grid order, flip it
+                if (pop_order.grid_id > 0) {
+                    let n_order_id = pair.pair_id << 40 | (pair.n_order & ORDER_ID_MASK);
+                    pair.n_order = pair.n_order + 1;
+                    flip_grid_order(taker_side, maker_price, n_order_id, pair.price_ratio, peer_tree, pop_order);
+                } else {
+                    destroy_order<BaseType, QuoteType>(pop_order);
+                };
             };
             if (taker_order.qty == 0) {
                 break
@@ -782,7 +802,75 @@ module sea::spot {
         taker_order.qty == 0
     }
 
-    fun flip_grid_order() {}
+    fun get_grid_delta_price(
+        account_addr: address,
+        grid_id: u64
+    ): u64 acquires AccountGrids {
+        let grids = borrow_global<AccountGrids>(account_addr);
+        table::borrow(&grids.grid_map, grid_id).delta_price
+    }
+
+    // side: the next fliped order's side
+    fun flip_grid_order<BaseType, QuoteType>(
+        side: u8,
+        maker_price: u64,
+        order_id: u64,
+        price_ratio: u64,
+        tree: &mut RBTree<OrderEntity<BaseType, QuoteType>>,
+        order: OrderEntity<BaseType, QuoteType>
+    ) acquires AccountGrids {
+        let OrderEntity {
+            qty: _,
+            grid_id: grid_id,
+            account_id: account_id,
+            base_frozen: base_frozen,
+            quote_frozen: quote_frozen,
+        } = order;
+        let addr = escrow::get_account_addr_by_id(account_id);
+        let delta_price = get_grid_delta_price(addr, grid_id);
+
+        if (side == SELL) {
+            // flip order is SELL order
+            let price = maker_price + delta_price;
+            let filp_order = OrderEntity<BaseType, QuoteType> {
+                qty: coin::value(&base_frozen),
+                grid_id: grid_id,
+                account_id: account_id,
+                base_frozen: base_frozen,
+                quote_frozen: coin::zero(),
+            };
+            if (coin::value(&quote_frozen) > 0) {
+                escrow::incr_escrow_coin<QuoteType>(addr, quote_frozen);
+            } else {
+                coin::destroy_zero(quote_frozen);
+            };
+            
+            rbtree::rb_insert(tree, generate_key(price, order_id), filp_order);
+        } else {
+            // flip order is BUY order
+            let price = maker_price - delta_price;
+            let (qty, left) = calc_base_qty_can_buy(coin::value(&quote_frozen), price, price_ratio);
+            let quote_left = coin::extract(&mut quote_frozen, left);
+            let filp_order = OrderEntity<BaseType, QuoteType> {
+                qty: qty,
+                grid_id: grid_id,
+                account_id: account_id,
+                base_frozen: coin::zero(),
+                quote_frozen: quote_frozen,
+            };
+            if (coin::value(&base_frozen) > 0) {
+                escrow::incr_escrow_coin<BaseType>(addr, base_frozen);
+            } else {
+                coin::destroy_zero(base_frozen);
+            };
+            if (coin::value(&quote_left) > 0) {
+                escrow::incr_escrow_coin<QuoteType>(addr, quote_left);
+            } else {
+                coin::destroy_zero(quote_left);
+            };
+            rbtree::rb_insert(tree, generate_key(price, order_id), filp_order);
+        }
+    }
 
     fun destroy_order<BaseType, QuoteType>(
         order: OrderEntity<BaseType, QuoteType>
@@ -808,6 +896,7 @@ module sea::spot {
         };
     }
 
+    // how many quote is need when buy qty base
     fun calc_quote_vol_for_buy(
         qty: u64,
         price: u64,
@@ -820,6 +909,19 @@ module sea::spot {
         
         assert!(vol < MAX_U64, E_VOL_EXCEED_MAX_U64);
         (vol as u64)
+    }
+
+    // return: how many base can buy
+    // return: how many quote left
+    fun calc_base_qty_can_buy(
+        vol: u64,
+        price: u64,
+        price_ratio: u64
+    ): (u64, u64) {
+        let vol_ampl = (vol as u128) * (price_ratio as u128);
+        let qty = ((vol_ampl / (price as u128)) as u64);
+        let left = vol - calc_quote_vol_for_buy(qty, price, price_ratio);
+        (qty, left)
     }
 
     // calculate quote volume: quote_vol = price * base_amt
@@ -1143,7 +1245,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair {
+    ) acquires NPair, Pair, AccountGrids {
         let price_ratio = test_register_pair(sea_admin, user1, user2, user3);
 
         place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000, false, false);
@@ -1207,7 +1309,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair {
+    ) acquires NPair, Pair, AccountGrids {
         let price_ratio = test_register_pair(sea_admin, user1, user2, user3);
 
         place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false, false);
@@ -1263,7 +1365,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair {
+    ) acquires NPair, Pair, AccountGrids {
         let price_ratio = test_register_pair(sea_admin, user1, user2, user3);
 
         place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false, false);
