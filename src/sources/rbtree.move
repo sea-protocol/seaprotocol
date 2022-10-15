@@ -160,9 +160,9 @@ module sea::rbtree {
     public fun borrow_by_pos<V>(
         tree: &RBTree<V>,
         pos: u64): &V {
-        let next = next_pos(tree, pos);
-        assert!(next > 0, E_NOT_EXIST);
-        let node = get_node<V>(&tree.nodes, next);
+        // let next = next_pos(tree, pos);
+        // assert!(next > 0, E_NOT_EXIST);
+        let node = get_node<V>(&tree.nodes, pos);
         &node.value
     }
 

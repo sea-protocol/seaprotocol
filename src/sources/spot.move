@@ -12,7 +12,7 @@
 module sea::spot {
     use std::signer::address_of;
     use std::vector;
-    // use std::debug;
+    use std::debug;
     use aptos_framework::coin::{Self, Coin};
     use aptos_framework::block;
     use aptos_std::table::{Self, Table};
@@ -102,6 +102,7 @@ module sea::spot {
     }
 
     struct GridConfig has copy, drop, store {
+        qty: u64,
         delta_price: u64
     }
 
@@ -151,6 +152,7 @@ module sea::spot {
     const E_INVALID_GRID_PRICE:  u64 = 16;
     const E_GRID_PRICE_BUY:      u64 = 17;
     const E_GRID_ORDER_COUNT:    u64 = 18;
+    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 19;
 
     // Public functions ====================================================
 
@@ -246,13 +248,38 @@ module sea::spot {
         // todo events
     }
 
+    // return: account_id
+    // return: grid_id
+    // return: base_frozen
+    // return: quote_frozen
+    public entry fun get_order_info<BaseType, QuoteType, FeeRatio>(
+        account: &signer,
+        side: u8,
+        order_key: u128,
+    ): (u64, u64, u64, u64, u64) acquires Pair {
+        let account_addr = address_of(account);
+        let pair = borrow_global<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+        let tree = if (side == SELL) &pair.asks else &pair.bids;
+
+        let pos = rbtree::rb_find(tree, order_key);
+        if (pos == 0) {
+            return (0, 0,  0, 0, 0)
+        };
+        debug::print(&pos);
+        let account_id = escrow::get_account_id(account_addr);
+        let order = rbtree::borrow_by_pos(tree, pos);
+        assert!(order.account_id == account_id, E_ORDER_ACCOUNT_ID_NOT_EQUAL);
+
+        (account_id, order.qty, order.grid_id, coin::value(&order.base_frozen), coin::value(&order.quote_frozen))
+    }
+
     // place post only order
     public entry fun place_postonly_order<BaseType, QuoteType, FeeRatio>(
         account: &signer,
         side: u8,
         price: u64,
         qty: u64,
-    ) acquires Pair {
+    ): u128 acquires Pair {
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
 
@@ -277,8 +304,8 @@ module sea::spot {
             base_frozen: coin::zero(),
             quote_frozen: coin::zero(),
         };
-        check_init_taker_escrow<BaseType, QuoteType>(account, side);
-        place_order(account, side, price, pair, order)
+        // check_init_taker_escrow<BaseType, QuoteType>(account, side);
+        return place_order(account, side, price, pair, order)
     }
 
     public entry fun place_limit_order<BaseType, QuoteType, FeeRatio>(
@@ -290,7 +317,7 @@ module sea::spot {
         fok: bool,
         // from_escrow: bool,
         // to_escrow: bool,
-    ) acquires Pair, AccountGrids {
+    ): u128 acquires Pair, AccountGrids {
         if (fok) {
             // TODO check this order can be filled
         };
@@ -312,11 +339,8 @@ module sea::spot {
             base_frozen: coin::zero(),
             quote_frozen: coin::zero(),
         };
-        // if (to_escrow) {
-        //    check_init_taker_escrow<BaseType, QuoteType>(account, side);
-        // };
-        // we don't check whether the account has enough asset just abort
-        match<BaseType, QuoteType, FeeRatio>(account, price, opts, order);
+
+        return match<BaseType, QuoteType, FeeRatio>(account, price, opts, order)
     }
 
     public entry fun place_market_order<BaseType, QuoteType, FeeRatio>(
@@ -351,6 +375,12 @@ module sea::spot {
         match<BaseType, QuoteType, FeeRatio>(account, 0, opts, order);
     }
 
+    // param: buy_price0: the highest buy price
+    // param: sell_price0: the lowest sell price
+    // param: buy_orders: total buy orders
+    // param: sell_orders: total sell orders
+    // param: per_qty: the base qty of order
+    // param: delta_price: 
     public entry fun place_grid_order<BaseType, QuoteType, FeeRatio>(
         account: &signer,
         buy_price0: u64,
@@ -362,7 +392,7 @@ module sea::spot {
         // from_escrow: bool,
     ) acquires Pair, AccountGrids {
         assert!(buy_price0 < sell_price0, E_INVALID_GRID_PRICE);
-        assert!(buy_orders + sell_orders >= 10, E_INVALID_GRID_PRICE);
+        assert!(buy_orders + sell_orders >= 2, E_GRID_ORDER_COUNT);
         // 
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
@@ -372,11 +402,11 @@ module sea::spot {
         grid_id = (pair.pair_id << 40) | grid_id;
         if (!exists<AccountGrids>(account_addr)) {
             let map = table::new<u64, GridConfig>();
-            table::add(&mut map, grid_id, GridConfig{ delta_price: delta_price });
+            table::add(&mut map, grid_id, GridConfig{ qty: per_qty, delta_price: delta_price });
             move_to(account, AccountGrids{ grid_map: map });
         } else {
             let grids = borrow_global_mut<AccountGrids>(account_addr);
-            table::add(&mut grids.grid_map, grid_id, GridConfig{ delta_price: delta_price });
+            table::add(&mut grids.grid_map, grid_id, GridConfig{ qty: per_qty, delta_price: delta_price });
         };
 
         if (sell_orders > 0)  {
@@ -385,7 +415,7 @@ module sea::spot {
                 let bid0 = get_best_price(bids);
                 assert!(sell_price0 >= bid0, E_PRICE_TOO_LOW);
             };
-            check_init_taker_escrow<BaseType, QuoteType>(account, SELL);
+            // check_init_taker_escrow<BaseType, QuoteType>(account, SELL);
             let i = 0;
             let price = sell_price0;
             while (i < sell_orders) {
@@ -398,6 +428,7 @@ module sea::spot {
                 };
                 place_order(account, SELL, price, pair, order);
                 price = price + delta_price;
+                i = i + 1;
             }
         };
         if (buy_orders > 0) {
@@ -407,7 +438,7 @@ module sea::spot {
                 // debug::print(&ask0);
                 assert!(buy_price0 <= ask0, E_PRICE_TOO_HIGH);
             };
-            check_init_taker_escrow<BaseType, QuoteType>(account, BUY);
+            // check_init_taker_escrow<BaseType, QuoteType>(account, BUY);
             let i = 0;
             let price = buy_price0;
             while (i < buy_orders) {
@@ -421,6 +452,7 @@ module sea::spot {
                 place_order(account, BUY, price, pair, order);
                 assert!(price > delta_price, E_GRID_PRICE_BUY);
                 price = price - delta_price;
+                i = i + 1;
             }
         };
     }
@@ -448,6 +480,7 @@ module sea::spot {
 
     // when cancel an order, we need order_key, not just order_id
     // order_key = order_price << 64 | order_id
+    // FIXME: should we panic is the order_key not found?
     public entry fun cancel_order<BaseType, QuoteType, FeeRatio>(
         account: &signer,
         side: u8,
@@ -650,7 +683,7 @@ module sea::spot {
         price: u64,
         opts: &PlaceOrderOpts,
         order: OrderEntity<BaseType, QuoteType>
-    ) acquires Pair, AccountGrids {
+    ): u128 acquires Pair, AccountGrids {
         let taker_addr = address_of(taker);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
 
@@ -670,10 +703,13 @@ module sea::spot {
             // place order to orderbook
             let taker_account_id = escrow::get_or_register_account_id(taker_addr);
             order.account_id = taker_account_id;
-            place_order(taker, opts.side, price, pair, order);
+            
+            place_order(taker, opts.side, price, pair, order)
         } else {
             destroy_taker_order(taker, order);
-        };
+
+            0
+        }
     }
 
     fun place_order<BaseType, QuoteType, FeeRatio>(
@@ -683,12 +719,12 @@ module sea::spot {
         price: u64,
         pair: &mut Pair<BaseType, QuoteType, FeeRatio>,
         order: OrderEntity<BaseType, QuoteType>
-    ) {
+    ): u128 {
         // fee or buy
         // init escrow BaseType if not exist
-        escrow::check_init_account_escrow<BaseType>(account);
+        // escrow::check_init_account_escrow<BaseType>(account);
         // init escrow QuoteType if not exist
-        escrow::check_init_account_escrow<QuoteType>(account);
+        // escrow::check_init_account_escrow<QuoteType>(account);
         // frozen
         if (side == SELL) {
             let qty = order.qty;
@@ -714,6 +750,8 @@ module sea::spot {
         let orderbook = if (side == BUY) &mut pair.bids else &mut pair.asks;
         let key: u128 = generate_key(price, order_id);
         rbtree::rb_insert<OrderEntity<BaseType, QuoteType>>(orderbook, key, order);
+
+        key
     }
 
     fun generate_key(price: u64, order_id: u64): u128 {
@@ -807,9 +845,10 @@ module sea::spot {
     fun get_grid_delta_price(
         account_addr: address,
         grid_id: u64
-    ): u64 acquires AccountGrids {
+    ): (u64, u64) acquires AccountGrids {
         let grids = borrow_global<AccountGrids>(account_addr);
-        table::borrow(&grids.grid_map, grid_id).delta_price
+        let gc = table::borrow(&grids.grid_map, grid_id);
+        (gc.qty, gc.delta_price)
     }
 
     // side: the next fliped order's side
@@ -829,10 +868,10 @@ module sea::spot {
             quote_frozen: quote_frozen,
         } = order;
         let addr = escrow::get_account_addr_by_id(account_id);
-        let delta_price = get_grid_delta_price(addr, grid_id);
+        let (grid_qty, delta_price) = get_grid_delta_price(addr, grid_id);
 
         if (side == SELL) {
-            // flip order is SELL order
+            // fliped order is SELL order
             let price = maker_price + delta_price;
             let filp_order = OrderEntity<BaseType, QuoteType> {
                 qty: coin::value(&base_frozen),
@@ -842,7 +881,8 @@ module sea::spot {
                 quote_frozen: coin::zero(),
             };
             if (coin::value(&quote_frozen) > 0) {
-                escrow::incr_escrow_coin<QuoteType>(addr, quote_frozen);
+                // escrow::incr_escrow_coin<QuoteType>(addr, quote_frozen);
+                coin::deposit<QuoteType>(addr, quote_frozen);
             } else {
                 coin::destroy_zero(quote_frozen);
             };
@@ -851,25 +891,30 @@ module sea::spot {
         } else {
             // flip order is BUY order
             let price = maker_price - delta_price;
-            let (qty, remnant) = calc_base_qty_can_buy(coin::value(&quote_frozen), price, price_ratio);
-            let quote_remnant = coin::extract(&mut quote_frozen, remnant);
+            debug::print(&price);
+            // let (qty, remnant) = calc_base_qty_can_buy(coin::value(&quote_frozen), price, price_ratio);
+            let quote_needed = calc_quote_vol_for_buy(grid_qty, price, price_ratio);
+            debug::print(&quote_needed);
+            // debug::print(&remnant);
+            let n_quote_frozen = coin::extract(&mut quote_frozen, quote_needed);
             let filp_order = OrderEntity<BaseType, QuoteType> {
-                qty: qty,
+                qty: grid_qty,
                 grid_id: grid_id,
                 account_id: account_id,
                 base_frozen: coin::zero(),
-                quote_frozen: quote_frozen,
+                quote_frozen: n_quote_frozen,
             };
             if (coin::value(&base_frozen) > 0) {
-                escrow::incr_escrow_coin<BaseType>(addr, base_frozen);
+                coin::deposit<BaseType>(addr, base_frozen);
             } else {
                 coin::destroy_zero(base_frozen);
             };
-            if (coin::value(&quote_remnant) > 0) {
-                escrow::incr_escrow_coin<QuoteType>(addr, quote_remnant);
+            if (coin::value(&quote_frozen) > 0) {
+                coin::deposit<QuoteType>(addr, quote_frozen);
             } else {
-                coin::destroy_zero(quote_remnant);
+                coin::destroy_zero(quote_frozen);
             };
+            debug::print(&generate_key(price, order_id));
             rbtree::rb_insert(tree, generate_key(price, order_id), filp_order);
         }
     }
@@ -931,6 +976,7 @@ module sea::spot {
     }
 
     // how many quote is need when buy qty base
+    // return: the quote volume needed
     fun calc_quote_vol_for_buy(
         qty: u64,
         price: u64,
@@ -959,6 +1005,8 @@ module sea::spot {
     }
 
     // calculate quote volume: quote_vol = price * base_amt
+    // return: the quote needed
+    // return: the trade fee
     fun calc_quote_vol(
         taker_side: u8,
         qty: u64,
@@ -1042,19 +1090,11 @@ module sea::spot {
                 let to_plat = coin::extract(&mut to_taker, fee_plat_amt);
                 coin::merge(pair_quote_vault, to_plat);
             };
-            // if (taker_opts.to_escrow) {
-            //     escrow::incr_escrow_coin<QuoteType>(taker_addr, to_taker);
-            // } else {
-                // send to taker directly
-                coin::deposit(taker_addr, to_taker);
-            // };
+            coin::deposit(taker_addr, to_taker);
+
             // maker got base coin
             let base = coin::withdraw<BaseType>(taker, base_qty);
-            // if (taker_opts.from_escrow) {
-            //         escrow::dec_escrow_coin<BaseType>(taker_addr, base_qty)
-            //     } else {
-            //         coin::withdraw<BaseType>(taker, base_qty)
-            //     };
+
             // if the maker is grid
             if (maker_order.grid_id > 0) {
                 coin::merge(&mut maker_order.base_frozen, base);
@@ -1214,6 +1254,14 @@ module sea::spot {
         // assert!(freeze == escrow_frozen, 300+idx);
         // let sep = string::utf8(b"------------");
         // debug::print(&sep);
+    }
+    #[test_only]
+    fun test_get_order_key(
+        price: u64,
+        pair_id: u64,
+        order_id: u64,
+    ): u128 {
+        generate_key(price, (pair_id << 40) | order_id)
     }
 
     // Tests ==================================================================
@@ -1508,5 +1556,206 @@ module sea::spot {
 
         place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000);
         place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150200000000, 1500000);
+    }
+
+    #[test(
+        sea_admin = @sea,
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_e2e_place_cancel_order(
+        sea_admin: &signer,
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair {
+        test_register_pair(sea_admin, user1, user2, user3);
+
+        let order_key = place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000);
+        test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000, 0, 10);
+        test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT, 0, 11);
+        
+        cancel_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, order_key);
+        test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 0, 20);
+        test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT, 0, 21);
+
+        let order_key = place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000);
+        let usd = calc_quote_vol_for_buy(150130000000, 1500000, 10000000);
+        test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 0, 30);
+        test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-usd, 0, 31);
+        
+        cancel_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, order_key);
+        test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 0, 40);
+        test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT, 0, 41);
+    }
+    
+    #[test(
+        sea_admin = @sea,
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_e2e_place_cancel_buy_partial_filled_order(
+        sea_admin: &signer,
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids {
+        test_register_pair(sea_admin, user1, user2, user3);
+
+        let maker_order_key = place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000);
+
+        // partial filled
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, SELL, 150130000000, 1000000, false, false);
+
+        let (usd, total_fee) = calc_quote_vol(SELL, 1000000, 150130000000, 10000000, 200);
+        cancel_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, maker_order_key);
+        test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT+1000000, 0, 40);
+        // taker got USD, trade fee is USD, the maker got some trade fee
+        //
+        let (maker_shares, _) = fee::get_maker_fee_shares(total_fee, false);
+        test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-usd+maker_shares, 0, 41);
+    }
+
+    #[test(
+        sea_admin = @sea,
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_e2e_place_cancel_sell_partial_filled_order(
+        sea_admin: &signer,
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids {
+        test_register_pair(sea_admin, user1, user2, user3);
+
+        let maker_order_key = place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000);
+
+        // partial filled
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, BUY, 150130000000, 1000000, false, false);
+
+        let (usd, total_fee) = calc_quote_vol(BUY, 1000000, 150130000000, 10000000, 200);
+
+        cancel_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, maker_order_key);
+
+        let (maker_shares, _) = fee::get_maker_fee_shares(total_fee, false);
+        debug::print(&total_fee);
+        debug::print(&maker_shares);
+        let btc_bal = coin::balance<T_BTC>(address_of(user1));
+        debug::print(&btc_bal);
+        test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1000000+maker_shares, 0, 40);
+        // taker got USD, trade fee is USD, the maker got some trade fee
+        //
+        test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT+usd, 0, 41);
+    }
+
+    #[test(
+        sea_admin = @sea,
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_e2e_place_grid_order(
+        sea_admin: &signer,
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids {
+        test_register_pair(sea_admin, user1, user2, user3);
+
+        place_grid_order<T_BTC, T_USD, fee::FeeRatio200>(user1, 150130000000, 150150000000,
+            5, 5, 1500000, 10000000);
+
+        test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000*5, 0, 50);
+        let usd = calc_quote_vol_for_buy(150130000000, 1500000, 10000000) +
+                calc_quote_vol_for_buy(150120000000, 1500000, 10000000) +
+                calc_quote_vol_for_buy(150110000000, 1500000, 10000000) +
+                calc_quote_vol_for_buy(150100000000, 1500000, 10000000) +
+                calc_quote_vol_for_buy(150090000000, 1500000, 10000000);
+
+        test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-usd, 0, 51);
+    }
+
+    #[test(
+        sea_admin = @sea,
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_e2e_flip_grid_order_sell_side(
+        sea_admin: &signer,
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids {
+        test_register_pair(sea_admin, user1, user2, user3);
+
+        place_grid_order<T_BTC, T_USD, fee::FeeRatio200>(user1, 150130000000, 150150000000,
+            2, 2, 1500000, 10000000);
+        // sell orders
+        // 150160000000 1500000 s1
+        // 150150000000 1500000 s0
+        // buy orders
+        // 150130000000 1500000 s2
+        // 150120000000 1500000 s3
+        let flip_order_key = test_get_order_key(150140000000, 1, 4);
+        let (_, qty, grid_id, base_frozen, quote_frozen) = get_order_info<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, flip_order_key);
+        assert!(qty == 0, 1);
+        assert!(grid_id == 0, 1);
+        assert!(base_frozen == 0, 1);
+        assert!(quote_frozen == 0, 1);
+        
+        // s0 is filled, s1 is partial filled
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, BUY, 150170000000, 1500000+1000000, false, false);
+
+        // 150160000000 1500000 s1
+        // buy orders
+        // 150140000000 1500000 s0
+        // 150130000000 1500000
+        // 150120000000 1500000
+        let (usd1, fee1) = calc_quote_vol(BUY, 1500000, 150150000000, 10000000, 200);
+        let (usd2, fee2) = calc_quote_vol(BUY, 1000000, 150160000000, 10000000, 200);
+
+        test_check_account_asset<T_BTC>(address_of(user2), T_BTC_AMT+2500000-fee1-fee2, 0, 60);
+        test_check_account_asset<T_USD>(address_of(user2), T_USD_AMT-usd1-usd2, 0, 61);
+
+        // the order_key flipped
+        let flip_order_key = test_get_order_key(150140000000, 1, 4);
+        let (_, qty, grid_id, base_frozen, quote_frozen) = get_order_info<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, flip_order_key);
+        debug::print(&quote_frozen);
+        assert!(grid_id == ((1<<40)+1), 110);
+        assert!(base_frozen == 0, 111);
+        assert!(qty == 1500000, 113);
+        assert!(quote_frozen == 150140000000*1500000/10000000, 112);
+    }
+
+    #[test(
+        sea_admin = @sea,
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_e2e_flip_grid_order_buy_side(
+        sea_admin: &signer,
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids {
+        test_register_pair(sea_admin, user1, user2, user3);
+
+        place_grid_order<T_BTC, T_USD, fee::FeeRatio200>(user1, 150130000000, 150150000000,
+            5, 5, 1500000, 10000000);
+        // sell orders
+        // 150160000000 1500000
+        // 150150000000 1500000
+        // buy orders
+        // 150130000000 1500000
+        // 150120000000 1500000
+        
+        // partial filled
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, SELL, 150120000000, 1500000+1000000, false, false);
     }
 }
