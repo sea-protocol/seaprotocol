@@ -12,7 +12,7 @@
 module sea::spot {
     use std::signer::address_of;
     use std::vector;
-    use std::debug;
+    // use std::debug;
     use aptos_framework::coin::{Self, Coin};
     use aptos_framework::block;
     use aptos_std::table::{Self, Table};
@@ -265,7 +265,6 @@ module sea::spot {
         if (pos == 0) {
             return (0, 0,  0, 0, 0)
         };
-        debug::print(&pos);
         let account_id = escrow::get_account_id(account_addr);
         let order = rbtree::borrow_by_pos(tree, pos);
         assert!(order.account_id == account_id, E_ORDER_ACCOUNT_ID_NOT_EQUAL);
@@ -891,10 +890,10 @@ module sea::spot {
         } else {
             // flip order is BUY order
             let price = maker_price - delta_price;
-            debug::print(&price);
+            // debug::print(&price);
             // let (qty, remnant) = calc_base_qty_can_buy(coin::value(&quote_frozen), price, price_ratio);
             let quote_needed = calc_quote_vol_for_buy(grid_qty, price, price_ratio);
-            debug::print(&quote_needed);
+            // debug::print(&quote_needed);
             // debug::print(&remnant);
             let n_quote_frozen = coin::extract(&mut quote_frozen, quote_needed);
             let filp_order = OrderEntity<BaseType, QuoteType> {
@@ -914,7 +913,7 @@ module sea::spot {
             } else {
                 coin::destroy_zero(quote_frozen);
             };
-            debug::print(&generate_key(price, order_id));
+            // debug::print(&generate_key(price, order_id));
             rbtree::rb_insert(tree, generate_key(price, order_id), filp_order);
         }
     }
@@ -1642,10 +1641,10 @@ module sea::spot {
         cancel_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, maker_order_key);
 
         let (maker_shares, _) = fee::get_maker_fee_shares(total_fee, false);
-        debug::print(&total_fee);
-        debug::print(&maker_shares);
-        let btc_bal = coin::balance<T_BTC>(address_of(user1));
-        debug::print(&btc_bal);
+        // debug::print(&total_fee);
+        // debug::print(&maker_shares);
+        // let btc_bal = coin::balance<T_BTC>(address_of(user1));
+        // debug::print(&btc_bal);
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1000000+maker_shares, 0, 40);
         // taker got USD, trade fee is USD, the maker got some trade fee
         //
@@ -1707,10 +1706,16 @@ module sea::spot {
         assert!(grid_id == 0, 1);
         assert!(base_frozen == 0, 1);
         assert!(quote_frozen == 0, 1);
+        let (_, asks, bids) = test_get_pair_price_steps<T_BTC, T_USD, fee::FeeRatio200>();
+        assert!(vector::length(&asks) == 2, 2);
+        assert!(vector::length(&bids) == 2, 3);
         
         // s0 is filled, s1 is partial filled
         place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, BUY, 150170000000, 1500000+1000000, false, false);
 
+        let (_, asks, bids) = test_get_pair_price_steps<T_BTC, T_USD, fee::FeeRatio200>();
+        assert!(vector::length(&asks) == 1, 4);
+        assert!(vector::length(&bids) == 3, 5);
         // 150160000000 1500000 s1
         // buy orders
         // 150140000000 1500000 s0
@@ -1722,14 +1727,26 @@ module sea::spot {
         test_check_account_asset<T_BTC>(address_of(user2), T_BTC_AMT+2500000-fee1-fee2, 0, 60);
         test_check_account_asset<T_USD>(address_of(user2), T_USD_AMT-usd1-usd2, 0, 61);
 
+        let usd_frozen = 150140000000*1500000/10000000 + 150130000000*1500000/10000000 +
+            150120000000*1500000/10000000 + 150160000000*1000000/10000000;
+        let usd_got = 150150000000*1500000/10000000 + 150160000000*1000000/10000000;
+
+        let (maker_fee, _) = fee::get_maker_fee_shares(fee1+fee2, true);
+        test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-3000000+maker_fee, 0, 70);
+        // let btc_bal = coin::balance<T_USD>(address_of(user1));
+        // debug::print(&btc_bal);
+        // debug::print(&(T_USD_AMT-usd_frozen));
+        test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-usd_frozen+usd_got, 0, 71);
+
         // the order_key flipped
         let flip_order_key = test_get_order_key(150140000000, 1, 4);
         let (_, qty, grid_id, base_frozen, quote_frozen) = get_order_info<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, flip_order_key);
-        debug::print(&quote_frozen);
         assert!(grid_id == ((1<<40)+1), 110);
         assert!(base_frozen == 0, 111);
         assert!(qty == 1500000, 113);
         assert!(quote_frozen == 150140000000*1500000/10000000, 112);
+        // TODO flip twice
+        // TODO cancel grid orders
     }
 
     #[test(
@@ -1747,7 +1764,7 @@ module sea::spot {
         test_register_pair(sea_admin, user1, user2, user3);
 
         place_grid_order<T_BTC, T_USD, fee::FeeRatio200>(user1, 150130000000, 150150000000,
-            5, 5, 1500000, 10000000);
+            2, 2, 1500000, 10000000);
         // sell orders
         // 150160000000 1500000
         // 150150000000 1500000
@@ -1757,5 +1774,40 @@ module sea::spot {
         
         // partial filled
         place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user2, SELL, 150120000000, 1500000+1000000, false, false);
+        let (_, asks, bids) = test_get_pair_price_steps<T_BTC, T_USD, fee::FeeRatio200>();
+        // debug::print(&vector::length(&asks));
+        assert!(vector::length(&asks) == 3, 4);
+        assert!(vector::length(&bids) == 1, 5);
+
+        let (usd1, fee1) = calc_quote_vol(SELL, 1500000, 150130000000, 10000000, 200);
+        let (usd2, fee2) = calc_quote_vol(SELL, 1000000, 150120000000, 10000000, 200);
+        let (usd3, _) = calc_quote_vol(SELL, 1500000, 150120000000, 10000000, 200);
+
+        test_check_account_asset<T_BTC>(address_of(user2), T_BTC_AMT-2500000, 0, 60);
+        test_check_account_asset<T_USD>(address_of(user2), T_USD_AMT+usd1+usd2-fee1-fee2, 0, 61);
+
+        // sell orders
+        // 150160000000 1500000
+        // 150150000000 1500000
+        // 150140000000 1500000
+        // buy orders
+        // 150120000000 1500000
+        
+        let (maker_fee, _) = fee::get_maker_fee_shares(fee1+fee2, true);
+
+        // 1500000 * 2 + 1500000 - 1500000
+        test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000*2, 0, 70);
+        test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-usd1-usd3+maker_fee, 0, 71);
+
+        // the order_key flipped
+        let flip_order_key = test_get_order_key(150140000000, 1, 4);
+        let (_, qty, grid_id, base_frozen, quote_frozen) = get_order_info<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, flip_order_key);
+        assert!(grid_id == ((1<<40)+1), 110);
+        assert!(base_frozen == 1500000, 111);
+        assert!(qty == 1500000, 113);
+        assert!(quote_frozen == 0, 112);
+
+        // TODO flip twice
+        // TODO cancel grid orders
     }
 }

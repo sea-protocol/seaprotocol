@@ -1,7 +1,8 @@
 # seaprotocol
-Sea protocol is the ultimate DEX base on order-book & AMM on Aptos & Sui.
-
 We believe anybody has the right to trade any asset anywhere, anytime!
+
+Sea protocol is an ultimate DEX base on order-book & AMM, currently being developed on the Aptos & Sui blockchain.Sea protocol leverages the hyper parallelization of Aptos/Sui to bring incredible speed,reliability, and cost-effectiveness to decentralized trading.
+
 
 **Be the voice of freedom. Bank the unbanked. Speak for the silenced.**
 
@@ -26,12 +27,12 @@ for example, Alice place a grid order which has 8 orders, 4 is buy order, 4 is s
 If Sell0 is filled, this order got 100*2.5 = 250 quote; then this order will filp to buy order:
 | Side  | Price  | Qty  | 
 |---|---|---|
-| Buy  | 99  | 250/99=2.525  |
+| Buy  | 99  | 2.5  |
 
 If the filp order is filled, then it become sell order again:
 | Side  | Price  | Qty  | 
 |---|---|---|
-| Sell  | 100  | 2.525  |
+| Sell  | 100  | 2.5  |
 
 As the price fluctuates up and down, the grid filp again and again, the makes will got more and more profit.
 
