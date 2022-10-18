@@ -167,7 +167,8 @@ module sea::spot {
     const E_INVALID_GRID_PRICE:  u64 = 16;
     const E_GRID_PRICE_BUY:      u64 = 17;
     const E_GRID_ORDER_COUNT:    u64 = 18;
-    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 19;
+    const E_PAIR_PAUSED:         u64 = 19;
+    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 20;
 
     // Public functions ====================================================
 
@@ -322,6 +323,8 @@ module sea::spot {
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
 
+        assert!(!pair.paused, E_PAIR_PAUSED);
+
         if (side == SELL)  {
             let bids = &mut pair.bids;
             if (!rbtree::is_empty(bids)) {
@@ -435,6 +438,7 @@ module sea::spot {
         // 
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+        assert!(!pair.paused, E_PAIR_PAUSED);
         let account_id = escrow::get_or_register_account_id(account_addr);
         let grid_id = pair.n_grid + 1;
         pair.n_grid = grid_id;
@@ -774,6 +778,7 @@ module sea::spot {
         let taker_addr = address_of(taker);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
 
+        assert!(!pair.paused, E_PAIR_PAUSED);
         // let taker_account_id = if (to_escrow) {
         //     escrow::get_or_register_account_id(taker_addr)
         // } else 0;
