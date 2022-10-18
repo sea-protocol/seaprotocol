@@ -39,6 +39,20 @@ module sea::spot {
         is_market: bool,
     }
 
+    // OrderInfo order info
+    struct OrderInfo has copy, drop {
+        side: u8,
+        qty: u64,
+        price: u64,
+        // the grid id or 0 if is not grid
+        grid_id: u64,
+        // account_id
+        account_id: u64,
+        order_id: u64,
+        base_frozen: u64,
+        quote_frozen: u64,
+    }
+
     /// OrderEntity order entity. price, pair_id is on OrderBook
     struct OrderEntity<phantom BaseType, phantom QuoteType> has store {
         // base coin amount
@@ -55,6 +69,7 @@ module sea::spot {
     }
 
     struct Pair<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
+        paused: bool,
         n_order: u64,
         n_grid: u64,
         fee_ratio: u64,
@@ -200,6 +215,15 @@ module sea::spot {
         // todo event
     }
 
+    // pause pair, need admin AUTH
+    public fun pause_pair<BaseType, QuoteType, FeeRatio>(
+        sea_admin: &signer,
+    ) acquires Pair {
+        assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
+        let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+        pair.paused = true;
+    }
+
     // register pair, quote should be one of the egliable quote
     public fun register_pair<BaseType, QuoteType, FeeRatio>(
         _owner: &signer,
@@ -228,6 +252,7 @@ module sea::spot {
             price_coefficient);
         assert!(ok, E_PAIR_PRICE_INVALID);
         let pair: Pair<BaseType, QuoteType, FeeRatio> = Pair{
+            paused: false,
             n_order: 0,
             n_grid: 0,
             fee_ratio: fee_ratio,
@@ -270,6 +295,21 @@ module sea::spot {
         assert!(order.account_id == account_id, E_ORDER_ACCOUNT_ID_NOT_EQUAL);
 
         (account_id, order.qty, order.grid_id, coin::value(&order.base_frozen), coin::value(&order.quote_frozen))
+    }
+
+    // get_account_pair_orders get account pair orders, both asks and bids
+    public entry fun get_account_pair_orders<BaseType, QuoteType, FeeRatio>(
+        account: &signer,
+    ): vector<OrderInfo> acquires Pair {
+        let account_addr = address_of(account);
+        let account_id = escrow::get_account_id(account_addr);
+        let pair = borrow_global<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+        let orders = vector::empty<OrderInfo>();
+
+        get_account_side_orders(BUY, account_id, &mut orders, &pair.bids);
+        get_account_side_orders(SELL, account_id, &mut orders, &pair.asks);
+
+        orders
     }
 
     // place post only order
@@ -572,6 +612,50 @@ module sea::spot {
         };
     }
 
+    fun get_account_side_orders<BaseType, QuoteType>(
+        side: u8,
+        account_id: u64,
+        orders: &mut vector<OrderInfo>,
+        tree: &RBTree<OrderEntity<BaseType, QuoteType>>,
+    ) {
+        if (!rbtree::is_empty(tree)) {
+            let (pos, key, item) = rbtree::get_leftmost_pos_key_val(tree);
+            push_order(orders, side, account_id, key, item);
+            while (true) {
+                let (next_pos, next_key) = rbtree::get_next_pos_key(tree, pos);
+                if (next_key == 0) {
+                    break
+                };
+                pos  = next_pos;
+                key = next_key;
+                item = rbtree::borrow_by_pos<OrderEntity<BaseType, QuoteType>>(tree, next_pos);
+                push_order(orders, side, account_id, key, item);
+            }
+        }
+    }
+
+    fun push_order<BaseType, QuoteType>(
+        orders: &mut vector<OrderInfo>,
+        side: u8,
+        account_id: u64,
+        key: u128,
+        item: &OrderEntity<BaseType, QuoteType>,
+    ) {
+        let (price, order_id) = extract_order_key(key);
+        if (item.account_id == account_id) {
+            vector::push_back(orders, OrderInfo {
+                account_id: account_id,
+                grid_id: item.grid_id,
+                order_id: order_id,
+                price: price,
+                qty: item.qty,
+                side: side,
+                base_frozen: coin::value(&item.base_frozen),
+                quote_frozen: coin::value(&item.quote_frozen),
+            });
+        };
+    }
+
     fun get_price_steps<BaseType, QuoteType>(
         tree: &RBTree<OrderEntity<BaseType, QuoteType>>
     ): vector<PriceStep> {
@@ -647,6 +731,10 @@ module sea::spot {
 
     fun price_from_key(key: u128): u64 {
         ((key >> 64) as u64)
+    }
+
+    fun extract_order_key(key: u128): (u64, u64) {
+        (((key >> 64) as u64), (key as u64))
     }
 
     fun has_enough_asset<CoinType>(
