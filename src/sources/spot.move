@@ -16,7 +16,7 @@ module sea::spot {
     use aptos_framework::coin::{Self, Coin};
     use aptos_framework::block;
     use aptos_std::table::{Self, Table};
-    // use aptos_std::type_info::{Self, TypeInfo};
+    use aptos_std::type_info::{Self, TypeInfo};
     // use aptos_framework::account::{Self, SignerCapability};
     use sea::rbtree::{Self, RBTree};
     use sea::price;
@@ -66,6 +66,27 @@ module sea::spot {
         account_id: u64,
         base_frozen: Coin<BaseType>,
         quote_frozen: Coin<QuoteType>,
+    }
+
+    struct PairInfo has copy, drop {
+        base_info: TypeInfo,
+        quote_info: TypeInfo,
+        paused: bool,
+        n_order: u64,
+        n_grid: u64,
+        fee_ratio: u64,
+        base_id: u64,
+        quote_id: u64,
+        pair_id: u64,
+        lot_size: u64,
+        price_ratio: u64,       // price_coefficient*pow(10, base_precision-quote_precision)
+        price_coefficient: u64, // price coefficient, from 10^1 to 10^12
+        last_price: u64,        // last trade price
+        last_timestamp: u64,    // last trade timestamp
+        ask0: u64,
+        ask_orders: u64,
+        bid0: u64,
+        bid_orders: u64,
     }
 
     struct Pair<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
@@ -875,6 +896,7 @@ module sea::spot {
         // let completed = false;
         let fee_ratio = pair.fee_ratio;
         let price_ratio = pair.price_ratio;
+        let last_price = 0;
         let taker_side = taker_opts.side;
         let (orderbook, peer_tree) = if (taker_side == BUY) {
                 (&mut pair.asks, &mut pair.bids)
@@ -929,9 +951,15 @@ module sea::spot {
                     destroy_maker_order<BaseType, QuoteType>(pop_order);
                 };
             };
+            last_price = maker_price;
             if (taker_order.qty == 0) {
                 break
             }
+        };
+        if (last_price > 0) {
+            pair.last_price = last_price;
+            // 
+            pair.last_timestamp = block::get_current_block_height();
         };
 
         // if order is match completed
