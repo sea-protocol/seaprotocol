@@ -148,6 +148,7 @@ module sea::spot {
     const MAX_PAIR_ID: u64 = 0xffffff;
     const ORDER_ID_MASK: u64 = 0xffffffffff;
     const MAX_U64: u128 = 0xffffffffffffffff;
+    const ORDER_ID_MASK_U128: u128 = 0xffffffffff;
 
     const E_PAIR_NOT_EXIST:      u64 = 1;
     const E_NO_AUTH:             u64 = 2;
@@ -299,18 +300,18 @@ module sea::spot {
     }
 
     // get_account_pair_orders get account pair orders, both asks and bids
+    // return: (bid orders, ask orders)
     public entry fun get_account_pair_orders<BaseType, QuoteType, FeeRatio>(
         account: &signer,
-    ): vector<OrderInfo> acquires Pair {
+    ): (vector<OrderInfo>, vector<OrderInfo>) acquires Pair {
         let account_addr = address_of(account);
         let account_id = escrow::get_account_id(account_addr);
         let pair = borrow_global<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
-        let orders = vector::empty<OrderInfo>();
 
-        get_account_side_orders(BUY, account_id, &mut orders, &pair.bids);
-        get_account_side_orders(SELL, account_id, &mut orders, &pair.asks);
-
-        orders
+        (
+            get_account_side_orders(BUY, account_id, &pair.bids),
+            get_account_side_orders(SELL, account_id, &pair.asks)
+        )
     }
 
     // place post only order
@@ -619,12 +620,13 @@ module sea::spot {
     fun get_account_side_orders<BaseType, QuoteType>(
         side: u8,
         account_id: u64,
-        orders: &mut vector<OrderInfo>,
         tree: &RBTree<OrderEntity<BaseType, QuoteType>>,
-    ) {
+    ): vector<OrderInfo> {
+        let orders = vector::empty<OrderInfo>();
+
         if (!rbtree::is_empty(tree)) {
             let (pos, key, item) = rbtree::get_leftmost_pos_key_val(tree);
-            push_order(orders, side, account_id, key, item);
+            push_order(&mut orders, side, account_id, key, item);
             while (true) {
                 let (next_pos, next_key) = rbtree::get_next_pos_key(tree, pos);
                 if (next_key == 0) {
@@ -633,9 +635,11 @@ module sea::spot {
                 pos  = next_pos;
                 key = next_key;
                 item = rbtree::borrow_by_pos<OrderEntity<BaseType, QuoteType>>(tree, next_pos);
-                push_order(orders, side, account_id, key, item);
+                push_order(&mut orders, side, account_id, key, item);
             }
-        }
+        };
+
+        orders
     }
 
     fun push_order<BaseType, QuoteType>(
@@ -738,7 +742,7 @@ module sea::spot {
     }
 
     fun extract_order_key(key: u128): (u64, u64) {
-        (((key >> 64) as u64), (key as u64))
+        (((key >> 64) as u64), ((key & ORDER_ID_MASK_U128) as u64))
     }
 
     fun has_enough_asset<CoinType>(
@@ -1902,5 +1906,58 @@ module sea::spot {
 
         // TODO flip twice
         // TODO cancel grid orders
+    }
+
+    #[test(
+        sea_admin = @sea,
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_e2e_get_open_orders(
+        sea_admin: &signer,
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids {
+        test_register_pair(sea_admin, user1, user2, user3);
+
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150120000000, 1000000, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150020000000, 1100000, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 149020000000, 1200000, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 148020000000, 1300000, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 147020000000, 1400000, false, false);
+
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 151120000000, 1000000, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 152020000000, 1100000, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 152200000000, 1200000, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 153020000000, 1300000, false, false);
+        place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 156020000000, 1400000, false, false);
+
+        let (bid_orders, ask_orders) = get_account_pair_orders<T_BTC, T_USD, fee::FeeRatio200>(user1);
+
+        assert!(vector::length(&bid_orders) == 5, 1);
+        let bid0 = vector::borrow(&bid_orders, 0);
+        assert!(bid0.qty == 1000000, 11);
+        let bid1 = vector::borrow(&bid_orders, 1);
+        assert!(bid1.qty == 1100000, 12);
+        let bid2 = vector::borrow(&bid_orders, 2);
+        assert!(bid2.qty == 1200000, 12);
+        let bid3 = vector::borrow(&bid_orders, 3);
+        assert!(bid3.qty == 1300000, 12);
+        let bid4 = vector::borrow(&bid_orders, 4);
+        assert!(bid4.qty == 1400000, 12);
+
+        assert!(vector::length(&ask_orders) == 5, 2);
+        let ask0 = vector::borrow(&ask_orders, 0);
+        assert!(ask0.qty == 1000000, 11);
+        let ask1 = vector::borrow(&ask_orders, 1);
+        assert!(ask1.qty == 1100000, 12);
+        let ask2 = vector::borrow(&ask_orders, 2);
+        assert!(ask2.qty == 1200000, 12);
+        let ask3 = vector::borrow(&ask_orders, 3);
+        assert!(ask3.qty == 1300000, 12);
+        let ask4 = vector::borrow(&ask_orders, 4);
+        assert!(ask4.qty == 1400000, 12);
     }
 }
