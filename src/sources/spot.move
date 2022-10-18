@@ -296,6 +296,42 @@ module sea::spot {
         // todo events
     }
 
+    public entry fun get_pair_info<BaseType, QuoteType, FeeRatio>(): PairInfo acquires Pair {
+        let pair = borrow_global<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
+        let bid0 = if (rbtree::is_empty(&pair.bids)) {
+            0
+        } else {
+            price_from_key(rbtree::get_leftmost_key(&pair.bids))
+        };
+
+        let ask0 = if (rbtree::is_empty(&pair.asks)) {
+            0
+        } else {
+            price_from_key(rbtree::get_leftmost_key(&pair.asks))
+        };
+
+        PairInfo {
+            base_info: type_info::type_of<BaseType>(),
+            quote_info: type_info::type_of<QuoteType>(),
+            paused: pair.paused,
+            n_order: pair.n_order,
+            n_grid: pair.n_grid,
+            fee_ratio: pair.fee_ratio,
+            base_id: pair.base_id,
+            quote_id: pair.quote_id,
+            pair_id: pair.pair_id,
+            lot_size: pair.lot_size,
+            price_ratio: pair.price_ratio,       // price_coefficient*pow(10, base_precision-quote_precision)
+            price_coefficient: pair.price_coefficient, // price coefficient, from 10^1 to 10^12
+            last_price: pair.last_price,        // last trade price
+            last_timestamp: pair.last_timestamp,    // last trade timestamp
+            ask0: ask0,
+            ask_orders: rbtree::length(&pair.asks),
+            bid0: bid0,
+            bid_orders: rbtree::length(&pair.bids),
+        }
+    }
+
     // return: account_id
     // return: grid_id
     // return: base_frozen
