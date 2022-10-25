@@ -98,6 +98,7 @@ module sea::spot {
         quote_id: u64,
         pair_id: u64,
         lot_size: u64,
+        min_notional: u64,
         price_ratio: u64,       // price_coefficient*pow(10, base_precision-quote_precision)
         price_coefficient: u64, // price coefficient, from 10^1 to 10^12
         last_price: u64,        // last trade price
@@ -190,7 +191,9 @@ module sea::spot {
     const E_GRID_PRICE_BUY:      u64 = 17;
     const E_GRID_ORDER_COUNT:    u64 = 18;
     const E_PAIR_PAUSED:         u64 = 19;
-    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 20;
+    const E_LOT_SIZE:            u64 = 20;
+    const E_MIN_NOTIONAL:        u64 = 21;
+    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 22;
 
     // Public functions ====================================================
 
@@ -251,7 +254,7 @@ module sea::spot {
     public fun register_pair<BaseType, QuoteType, FeeRatio>(
         _owner: &signer,
         price_coefficient: u64
-    ) acquires NPair {
+    ) acquires NPair, QuoteConfig {
         utils::assert_is_coin<BaseType>();
         utils::assert_is_coin<QuoteType>();
         assert!(escrow::is_quote_coin<QuoteType>(), E_NOT_QUOTE_COIN);
@@ -259,6 +262,7 @@ module sea::spot {
 
         let base_id = escrow::get_or_register_coin_id<BaseType>(false);
         let quote_id = escrow::get_or_register_coin_id<QuoteType>(true);
+        let quote = borrow_global<QuoteConfig<QuoteType>>(@sea);
 
         let pair_account = escrow::get_spot_account();
         let fee_ratio = fee::get_fee_ratio<FeeRatio>();
@@ -283,6 +287,7 @@ module sea::spot {
             quote_id: quote_id,
             pair_id: pair_id,
             lot_size: 0,
+            min_notional: quote.min_notional,
             price_ratio: ratio,       // price_coefficient*pow(10, base_precision-quote_precision)
             price_coefficient: price_coefficient, // price coefficient, from 10^1 to 10^12
             last_price: 0,        // last trade price
@@ -382,6 +387,7 @@ module sea::spot {
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
 
         assert!(!pair.paused, E_PAIR_PAUSED);
+        validate_order(pair, qty, price);
 
         if (side == SELL)  {
             let bids = &mut pair.bids;
@@ -497,6 +503,8 @@ module sea::spot {
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
         assert!(!pair.paused, E_PAIR_PAUSED);
+        validate_order(pair, per_qty, buy_price0);
+
         let account_id = escrow::get_or_register_account_id(account_addr);
         let grid_id = pair.n_grid + 1;
         pair.n_grid = grid_id;
@@ -699,6 +707,28 @@ module sea::spot {
         orders
     }
 
+    fun validate_order<BaseType, QuoteType, FeeRatio>(
+        pair: &Pair<BaseType, QuoteType, FeeRatio>,
+        qty: u64,
+        price: u64,
+    ) {
+        assert!(filter_lot_size(qty, pair.lot_size), E_LOT_SIZE);
+        assert!(filter_min_notional(pair, qty, price), E_MIN_NOTIONAL);
+    }
+
+    fun filter_lot_size(qty: u64, lot_size: u64): bool {
+        (qty / lot_size) * lot_size == qty
+    }
+
+    fun filter_min_notional<BaseType, QuoteType, FeeRatio>(
+        pair: &Pair<BaseType, QuoteType, FeeRatio>,
+        qty: u64,
+        price: u64,
+    ): bool {
+        let vol = calc_quote_vol_for_buy(qty, price, pair.price_ratio);
+        vol >= pair.min_notional
+    }
+
     fun push_order<BaseType, QuoteType>(
         orders: &mut vector<OrderInfo>,
         side: u8,
@@ -840,6 +870,7 @@ module sea::spot {
         let pair = borrow_global_mut<Pair<BaseType, QuoteType, FeeRatio>>(@sea_spot);
 
         assert!(!pair.paused, E_PAIR_PAUSED);
+        validate_order(pair, order.qty, price);
         // let taker_account_id = if (to_escrow) {
         //     escrow::get_or_register_account_id(taker_addr)
         // } else 0;
@@ -1448,7 +1479,8 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ): u64 acquires NPair, Pair {
+    ): u64 acquires NPair, Pair, QuoteConfig {
+        // block::initialize_for_test(sea_admin, 1);
         test_prepare_account_env(sea_admin);
         test_init_coins_and_accounts(sea_admin, user1, user2, user3);
         // 1. register quote
@@ -1492,7 +1524,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair, AccountGrids {
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         let price_ratio = test_register_pair(sea_admin, user1, user2, user3);
 
         place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000, false, false);
@@ -1556,7 +1588,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair, AccountGrids {
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         let price_ratio = test_register_pair(sea_admin, user1, user2, user3);
 
         place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false, false);
@@ -1612,7 +1644,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair, AccountGrids {
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         let price_ratio = test_register_pair(sea_admin, user1, user2, user3);
 
         place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000, false, false);
@@ -1673,7 +1705,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair {
+    ) acquires NPair, Pair, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000);
@@ -1692,7 +1724,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair {
+    ) acquires NPair, Pair, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000);
@@ -1711,7 +1743,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair {
+    ) acquires NPair, Pair, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000);
@@ -1729,7 +1761,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair {
+    ) acquires NPair, Pair, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         let order_key = place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000);
@@ -1761,7 +1793,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair, AccountGrids {
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         let maker_order_key = place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150130000000, 1500000);
@@ -1789,7 +1821,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair, AccountGrids {
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         let maker_order_key = place_postonly_order<T_BTC, T_USD, fee::FeeRatio200>(user1, SELL, 150130000000, 1500000);
@@ -1823,7 +1855,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair, AccountGrids {
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         place_grid_order<T_BTC, T_USD, fee::FeeRatio200>(user1, 150130000000, 150150000000,
@@ -1850,7 +1882,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair, AccountGrids {
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         place_grid_order<T_BTC, T_USD, fee::FeeRatio200>(user1, 150130000000, 150150000000,
@@ -1921,7 +1953,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair, AccountGrids {
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         place_grid_order<T_BTC, T_USD, fee::FeeRatio200>(user1, 150130000000, 150150000000,
@@ -1983,7 +2015,7 @@ module sea::spot {
         user1: &signer,
         user2: &signer,
         user3: &signer,
-    ) acquires NPair, Pair, AccountGrids {
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(sea_admin, user1, user2, user3);
 
         place_limit_order<T_BTC, T_USD, fee::FeeRatio200>(user1, BUY, 150120000000, 1000000, false, false);
