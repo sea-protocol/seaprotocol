@@ -285,6 +285,8 @@ module sea::escrow {
         id
     }
 
+    // Private functions ====================================================
+
     fun account_asset_id(account_id: u64, coin_id: u64): u64 {
         (account_id << 32) | (coin_id & 0xffffffff)
     }
