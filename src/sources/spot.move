@@ -99,6 +99,7 @@ module sea::spot {
         pair_id: u64,
         lot_size: u64,
         min_notional: u64,
+        mint_weight: u64,
         price_ratio: u64,       // price_coefficient*pow(10, base_precision-quote_precision)
         price_coefficient: u64, // price coefficient, from 10^1 to 10^12
         last_price: u64,        // last trade price
@@ -288,6 +289,7 @@ module sea::spot {
             pair_id: pair_id,
             lot_size: 0,
             min_notional: quote.min_notional,
+            mint_weight: 0,
             price_ratio: ratio,       // price_coefficient*pow(10, base_precision-quote_precision)
             price_coefficient: price_coefficient, // price coefficient, from 10^1 to 10^12
             last_price: 0,        // last trade price
