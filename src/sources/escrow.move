@@ -25,6 +25,7 @@ module sea::escrow {
     const E_COIN_NOT_EQUAL:      u64 = 6001;
     const E_NO_ESCROW_ASSET:     u64 = 6002;
     const E_ACCOUNT_REGISTERED:  u64 = 6003;
+    const E_QUOTE_PRIORITY:      u64 = 6004;
 
     struct EscrowAccountAsset has key {
         n_coin: u64,
@@ -180,6 +181,14 @@ module sea::escrow {
             &escrow_ref.account_map,
             id
         )
+    }
+
+    // validate pair
+    public fun validate_pair<BaseType, QuoteType>() acquires EscrowAccountAsset {
+        let base_id = get_coin_id<BaseType>();
+        let quote_id = get_coin_id<QuoteType>();
+
+        assert!(quote_id < base_id, E_QUOTE_PRIORITY);
     }
 
     public(friend) fun get_or_register_account_id(addr: address): u64 acquires EscrowAccountAsset {

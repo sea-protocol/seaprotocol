@@ -194,7 +194,8 @@ module sea::spot {
     const E_PAIR_PAUSED:         u64 = 19;
     const E_LOT_SIZE:            u64 = 20;
     const E_MIN_NOTIONAL:        u64 = 21;
-    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 22;
+    const E_PAIR_PRIORITY:       u64 = 22;
+    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 23;
 
     // Public functions ====================================================
 
@@ -263,6 +264,10 @@ module sea::spot {
 
         let base_id = escrow::get_or_register_coin_id<BaseType>(false);
         let quote_id = escrow::get_or_register_coin_id<QuoteType>(true);
+        if (escrow::is_quote_coin<BaseType>()) {
+            // if both base and quote is quotable
+            assert!(base_id > quote_id, E_PAIR_PRIORITY);
+        };
         let quote = borrow_global<QuoteConfig<QuoteType>>(@sea);
 
         let pair_account = escrow::get_spot_account();

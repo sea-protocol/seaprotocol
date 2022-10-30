@@ -28,4 +28,28 @@ module sea::math {
         ensures degree == 0 ==> result == 1;
         ensures result == spec_pow(10, degree);
     }
+
+    public fun min_u64(a: u64, b: u64): u64 {
+        if (a < b) a else b
+    }
+
+    /// Get square root of `y`.
+    /// Babylonian method (https://en.wikipedia.org/wiki/Methods_of_computing_square_roots#Babylonian_method)
+    public fun sqrt(y: u128): u64 {
+        if (y < 4) {
+            if (y == 0) {
+                0u64
+            } else {
+                1u64
+            }
+        } else {
+            let z = y;
+            let x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            };
+            (z as u64)
+        }
+    }
 }
