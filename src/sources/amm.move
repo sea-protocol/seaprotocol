@@ -19,7 +19,6 @@ module sea::amm {
     use uq64x64::uq64x64;
 
     use sea::math;
-    use sea::utils;
     use sea::escrow;
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -39,6 +38,9 @@ module sea::amm {
     const E_INVALID_LOAN_PARAM:            u64 = 5008;
     const E_INSUFFICIENT_AMOUNT:           u64 = 5009;
     const E_PAY_LOAN_ERROR:                u64 = 5010;
+    const E_INSUFFICIENT_BASE_AMOUNT:      u64 = 5011;
+    const E_INSUFFICIENT_QUOTE_AMOUNT:     u64 = 5012;
+    const E_INTERNAL_ERROR:                u64 = 5013;
 
     // LP token
     struct LP<phantom BaseType, phantom QuoteType, phantom FeeRatio> {}
@@ -85,7 +87,7 @@ module sea::amm {
 
     // create_pool should be called by spot register_pair
     public(friend) fun create_pool<BaseType, QuoteType, FeeRatio>(
-        pair_account: signer,
+        pair_account: &signer,
         base_id: u64,
         quote_id: u64,
         fee: u64,
@@ -93,7 +95,7 @@ module sea::amm {
         let (name, symbol) = get_lp_name_symbol<BaseType, QuoteType>();
         let (lp_burn_cap, lp_freeze_cap, lp_mint_cap) =
             coin::initialize<LP<BaseType, QuoteType, FeeRatio>>(
-                &pair_account,
+                pair_account,
                 name,
                 symbol,
                 6,
@@ -115,7 +117,16 @@ module sea::amm {
             locked: false,
             fee: fee,
         };
-        move_to(&pair_account, pool);
+        move_to(pair_account, pool);
+        coin::register<LP<BaseType, QuoteType, FeeRatio>>(pair_account);
+    }
+
+    public fun get_min_liquidity(): u64 {
+        MIN_LIQUIDITY
+    }
+    
+    public fun pool_exist<BaseType, QuoteType, FeeRatio>(): bool {
+        exists<Pool<BaseType, QuoteType, FeeRatio>>(@sea_spot)
     }
 
     public fun mint<BaseType, QuoteType, FeeRatio>(
@@ -153,7 +164,7 @@ module sea::amm {
         lp
     }
 
-    public entry fun burn<BaseType, QuoteType, FeeRatio>(
+    public fun burn<BaseType, QuoteType, FeeRatio>(
         lp: Coin<LP<BaseType, QuoteType, FeeRatio>>,
     ): (Coin<BaseType>, Coin<QuoteType>) acquires Pool {
         escrow::validate_pair<BaseType, QuoteType>();
@@ -216,6 +227,41 @@ module sea::amm {
         (base_swaped, quote_swaped)
     }
 
+    /// Calculate optimal amounts of coins to add
+    public fun calc_optimal_coin_values<B, Q, F>(
+        amount_base_desired: u64,
+        amount_quote_desired: u64,
+        amount_base_min: u64,
+        amount_quote_min: u64
+    ): (u64, u64) acquires Pool {
+        let pool = borrow_global<Pool<B, Q, F>>(@sea_spot);
+        let (reserve_base, reserve_quote) = (coin::value(&pool.base_reserve), coin::value(&pool.quote_reserve));
+        if (reserve_base == 0 && reserve_quote == 0) {
+            (amount_base_desired, amount_quote_desired)
+        } else {
+            let amount_quote_optimal = quote(amount_base_desired, reserve_base, reserve_quote);
+            if (amount_quote_optimal <= amount_quote_desired) {
+                assert!(amount_quote_optimal >= amount_quote_min, E_INSUFFICIENT_QUOTE_AMOUNT);
+                (amount_base_desired, amount_quote_optimal)
+            } else {
+                let amount_base_optimal = quote(amount_quote_desired, reserve_quote, reserve_base);
+                assert!(amount_base_optimal <= amount_base_desired, E_INTERNAL_ERROR);
+                assert!(amount_base_optimal >= amount_base_min, E_INSUFFICIENT_BASE_AMOUNT);
+                (amount_base_optimal, amount_quote_desired)
+            }
+        }
+    }
+
+    fun quote(
+        amount_base: u64,
+        reserve_base: u64,
+        reserve_quote: u64
+    ): u64 {
+        assert!(amount_base > 0, E_INSUFFICIENT_AMOUNT);
+        assert!(reserve_base > 0 && reserve_quote > 0, E_INSUFFICIENT_AMOUNT);
+        ((amount_base as u128) * (reserve_quote as u128) / (reserve_base as u128) as u64)
+    }
+
     // k should not decrease
     fun assert_k_increase(
         base_balance: u64,
@@ -233,8 +279,8 @@ module sea::amm {
         // should be: new_reserve_x * new_reserve_y > old_reserve_x * old_eserve_y
         // gas saving
         if (
-            utils::is_overflow_mul(base_balance_adjusted, quote_balance_adjusted)
-            || utils::is_overflow_mul(balance_k_old_not_scaled, scale)
+            math::is_overflow_mul(base_balance_adjusted, quote_balance_adjusted)
+            || math::is_overflow_mul(balance_k_old_not_scaled, scale)
         ) {
             let balance_xy_adjusted = u256::mul(u256::from_u128(base_balance_adjusted), u256::from_u128(quote_balance_adjusted));
             let balance_xy_old = u256::mul(u256::from_u128(balance_k_old_not_scaled), u256::from_u128(scale));
@@ -350,6 +396,34 @@ module sea::amm {
 
     fun mint_fee<BaseType, QuoteType, FeeRatio>(
         pool: &mut Pool<BaseType, QuoteType, FeeRatio>,
+        dao_fee: u64,
     ) {
+        let k_last = pool.k_last;
+        let base_reserve = coin::value(&pool.base_reserve);
+        let quote_reserve = coin::value(&pool.quote_reserve);
+
+        if (k_last != 0) {
+            let root_k = math::sqrt((base_reserve as u128) * (quote_reserve as u128));
+            let root_k_last = math::sqrt(k_last);
+            let total_supply = option::extract(&mut coin::supply<LP<BaseType, QuoteType, FeeRatio>>());
+            if (root_k > root_k_last) {
+                let delta_k = ((root_k - root_k_last) as u128);
+                let liquidity;
+                if (math::is_overflow_mul(total_supply, delta_k)) {
+                    let numerator = u256::mul(u256::from_u128(total_supply), u256::from_u128(delta_k));
+                    let denominator = u256::from_u128((root_k as u128) * (dao_fee as u128) + (root_k_last as u128));
+                    liquidity = u256::as_u64(u256::div(numerator, denominator));
+                } else {
+                    let numerator = total_supply * delta_k;
+                    let denominator = (root_k as u128) * (dao_fee as u128) + (root_k_last as u128);
+                    liquidity = ((numerator / denominator) as u64);
+                };
+                if (liquidity > 0) {
+                    let coins = coin::mint<LP<BaseType, QuoteType, FeeRatio>>(liquidity, &pool.lp_mint_cap);
+                    coin::deposit(@sea_spot, coins);
+                }
+            }
+        };
+        pool.k_last = (base_reserve as u128) * (quote_reserve as u128);
     }
 }

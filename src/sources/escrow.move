@@ -19,6 +19,8 @@ module sea::escrow {
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     friend sea::spot;
+    friend sea::amm;
+    friend sea::router;
 
     // Constants ====================================================
     const E_NO_AUTH:             u64 = 6000;

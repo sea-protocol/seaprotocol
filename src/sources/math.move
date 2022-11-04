@@ -1,5 +1,7 @@
 module sea::math {
 
+    const MAX_U128: u128 = 340282366920938463463374607431768211455;
+
     /// Returns 10^degree.
     public fun pow_10(degree: u8): u64 {
         let res = 1;
@@ -51,5 +53,10 @@ module sea::math {
             };
             (z as u64)
         }
+    }
+    // Check if mul maybe overflow
+    // The result maybe false positive
+    public fun is_overflow_mul(a: u128, b: u128): bool {
+        MAX_U128 / b <= a
     }
 }
