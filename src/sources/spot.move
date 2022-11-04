@@ -255,7 +255,8 @@ module sea::spot {
     // register pair, quote should be one of the egliable quote
     public fun register_pair<BaseType, QuoteType, FeeRatio>(
         _owner: &signer,
-        price_coefficient: u64
+        price_coefficient: u64,
+        lot_size: u64,
     ) acquires NPair, QuoteConfig {
         utils::assert_is_coin<BaseType>();
         utils::assert_is_coin<QuoteType>();
@@ -292,7 +293,7 @@ module sea::spot {
             base_id: base_id,
             quote_id: quote_id,
             pair_id: pair_id,
-            lot_size: 0,
+            lot_size: lot_size,
             min_notional: quote.min_notional,
             mint_weight: 0,
             price_ratio: ratio,       // price_coefficient*pow(10, base_precision-quote_precision)
@@ -1310,6 +1311,10 @@ module sea::spot {
     use std::string;
     #[test_only]
     use aptos_framework::aptos_account;
+    #[test_only]
+    use aptos_framework::genesis;
+    #[test_only]
+    use aptos_framework::account;
     // #[test_only]
     // use std::debug;
 
@@ -1351,6 +1356,10 @@ module sea::spot {
     fun test_prepare_account_env(
         sea_admin: &signer
     ) {
+        // account::create_account_for_test(@sea);
+        genesis::setup();
+        account::create_account_for_test(@sea_spot);
+
         spot_account::initialize_spot_account(sea_admin);
         initialize(sea_admin);
         escrow::initialize(sea_admin);
@@ -1493,7 +1502,7 @@ module sea::spot {
         // 1. register quote
         register_quote<T_USD>(sea_admin, 10, 10);
         // 2. 
-        register_pair<T_BTC, T_USD, fee::FeeRatio200>(sea_admin, 10000000);
+        register_pair<T_BTC, T_USD, fee::FeeRatio200>(sea_admin, 10000000, 10);
 
         let pair = borrow_global_mut<Pair<T_BTC, T_USD, fee::FeeRatio200>>(@sea_spot);
         pair.price_ratio

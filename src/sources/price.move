@@ -82,7 +82,8 @@ module sea::price {
     fun test_valid_price() {
         let maxu128: u128 = 0xffffffffffffffffffffffffffffffff;
         let i: u128 = 1;
-        while(i <= 100000) {
+        // while(i <= 100000) {
+        while(i <= 100) {
             let price = i;
             loop {
                 let ok = is_valid_price(price);

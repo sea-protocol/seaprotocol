@@ -41,4 +41,18 @@ module sea::spot_account {
             move_from<CapabilityStorage>(signer::address_of(sea_admin));
         signer_cap
     }
+
+    #[test_only]
+    use std::debug;
+
+    #[test(sea_admin = @sea)]
+    fun test_resource_account(
+        sea_admin: &signer
+    ): signer {
+        let (_, signer_cap) =
+            account::create_resource_account(sea_admin, b"sea_spot_account");
+        let sig = account::create_signer_with_capability(&signer_cap);
+        debug::print(&signer::address_of(&sig));
+        return sig
+    }
 }
