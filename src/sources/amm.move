@@ -18,8 +18,10 @@ module sea::amm {
     use u256::u256;
     use uq64x64::uq64x64;
 
+    use sea::fee;
     use sea::math;
     use sea::escrow;
+    use sea_lp::lp::{LP};
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     friend sea::spot;
@@ -43,9 +45,6 @@ module sea::amm {
     const E_INSUFFICIENT_QUOTE_AMOUNT:     u64 = 5012;
     const E_INTERNAL_ERROR:                u64 = 5013;
 
-    // LP token
-    struct LP<phantom BaseType, phantom QuoteType, phantom FeeRatio> {}
-
     // Pool liquidity pool
     struct Pool<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
         base_id: u64,
@@ -65,7 +64,6 @@ module sea::amm {
     // AMMConfig global AMM config
     struct AMMConfig has key {
         dao_fee: u64, // DAO will take 1/dao_fee from trade fee
-
     }
 
     // Flashloan flash loan
@@ -88,7 +86,7 @@ module sea::amm {
 
     // create_pool should be called by spot register_pair
     public(friend) fun create_pool<B, Q, F>(
-        pair_account: &signer,
+        res_account: &signer,
         base_id: u64,
         quote_id: u64,
         fee: u64,
@@ -96,7 +94,7 @@ module sea::amm {
         let (name, symbol) = get_lp_name_symbol<B, Q>();
         let (lp_burn_cap, lp_freeze_cap, lp_mint_cap) =
             coin::initialize<LP<B, Q, F>>(
-                pair_account,
+                res_account,
                 name,
                 symbol,
                 6,
@@ -118,8 +116,8 @@ module sea::amm {
             locked: false,
             fee: fee,
         };
-        move_to(pair_account, pool);
-        coin::register<LP<B, Q, F>>(pair_account);
+        move_to(res_account, pool);
+        coin::register<LP<B, Q, F>>(res_account);
     }
 
     public fun get_min_liquidity(): u64 {
@@ -335,10 +333,11 @@ module sea::amm {
         quote_reserve: u64,
         fee: u64,
     ) {
-        let base_balance_adjusted = (base_balance as u128) * 10000 - (base_in as u128) * (fee as u128);
-        let quote_balance_adjusted = (quote_balance as u128) * 10000 - (quote_in as u128) * (fee as u128);
+        let fee_deno = (fee::get_fee_denominate() as u128);
+        let base_balance_adjusted = (base_balance as u128) * fee_deno - (base_in as u128) * (fee as u128);
+        let quote_balance_adjusted = (quote_balance as u128) * fee_deno - (quote_in as u128) * (fee as u128);
         let balance_k_old_not_scaled = (base_reserve as u128) * (quote_reserve as u128);
-        let scale = 100000000;
+        let scale = fee_deno * fee_deno;
         // should be: new_reserve_x * new_reserve_y > old_reserve_x * old_eserve_y
         // gas saving
         if (
@@ -437,4 +436,7 @@ module sea::amm {
         };
         pool.k_last = (base_reserve as u128) * (quote_reserve as u128);
     }
+
+    // Test-only functions ====================================================
+    // Tests ==================================================================
 }

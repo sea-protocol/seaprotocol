@@ -16,6 +16,9 @@ user_3 = "0x3333"
 [dependencies.SeaInit]
 local = "./sea_init/"
 
+[dependencies.SeaLP]
+local = "./sea_lp/"
+
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"
 subdir = "aptos-move/framework/aptos-framework"

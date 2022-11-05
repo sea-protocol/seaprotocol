@@ -13,7 +13,8 @@ module sea::router {
     use std::signer::address_of;
     use aptos_framework::coin::{Self, Coin};
 
-    use sea::amm::{Self, LP};
+    use sea_lp::lp::{LP};
+    use sea::amm;
     use sea::escrow;
     use sea::utils;
     use sea::fee;

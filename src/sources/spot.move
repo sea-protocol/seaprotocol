@@ -24,6 +24,7 @@ module sea::spot {
     use sea::fee;
     use sea::math;
     use sea::escrow;
+    use sea::amm;
     // use sea::spot_account;
 
     // Structs ====================================================
@@ -305,8 +306,9 @@ module sea::spot {
             base_vault: coin::zero(),
             quote_vault: coin::zero(),
         };
+        // create AMM pool
+        amm::create_pool<B, Q, F>(&pair_account, base_id, quote_id, fee_ratio);
         move_to(&pair_account, pair);
-        // todo events
     }
 
     public entry fun get_pair_info<B, Q, F>(): PairInfo acquires Pair {
