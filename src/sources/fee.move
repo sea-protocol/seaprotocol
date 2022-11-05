@@ -75,6 +75,11 @@ module sea::fee {
         0
     }
 
+    // fee denominate
+    public fun get_fee_denominate(): u64 {
+        FEE_DENOMINATE
+    }
+
     // Tests ==================================================================
     #[test_only]
     use std::vector;

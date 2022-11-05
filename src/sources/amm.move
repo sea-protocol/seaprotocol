@@ -27,6 +27,7 @@ module sea::amm {
     // Constants ====================================================
     const MIN_LIQUIDITY: u64 = 500;
 
+    // Errors ====================================================
     const E_NO_AUTH:                       u64 = 5000;
     const E_INITIALIZED:                   u64 = 5001;
     const E_POOL_LOCKED:                   u64 = 5002;
@@ -251,44 +252,6 @@ module sea::amm {
             }
         }
     }
-
-    fun quote(
-        amount_base: u64,
-        reserve_base: u64,
-        reserve_quote: u64
-    ): u64 {
-        assert!(amount_base > 0, E_INSUFFICIENT_AMOUNT);
-        assert!(reserve_base > 0 && reserve_quote > 0, E_INSUFFICIENT_AMOUNT);
-        ((amount_base as u128) * (reserve_quote as u128) / (reserve_base as u128) as u64)
-    }
-
-    // k should not decrease
-    fun assert_k_increase(
-        base_balance: u64,
-        quote_balance: u64,
-        base_in: u64,
-        quote_in: u64,
-        base_reserve: u64,
-        quote_reserve: u64,
-        fee: u64,
-    ) {
-        let base_balance_adjusted = (base_balance as u128) * 10000 - (base_in as u128) * (fee as u128);
-        let quote_balance_adjusted = (quote_balance as u128) * 10000 - (quote_in as u128) * (fee as u128);
-        let balance_k_old_not_scaled = (base_reserve as u128) * (quote_reserve as u128);
-        let scale = 100000000;
-        // should be: new_reserve_x * new_reserve_y > old_reserve_x * old_eserve_y
-        // gas saving
-        if (
-            math::is_overflow_mul(base_balance_adjusted, quote_balance_adjusted)
-            || math::is_overflow_mul(balance_k_old_not_scaled, scale)
-        ) {
-            let balance_xy_adjusted = u256::mul(u256::from_u128(base_balance_adjusted), u256::from_u128(quote_balance_adjusted));
-            let balance_xy_old = u256::mul(u256::from_u128(balance_k_old_not_scaled), u256::from_u128(scale));
-            assert!(u256::compare(&balance_xy_adjusted, &balance_xy_old) == 2, ERR_K_ERROR);
-        } else {
-            assert!(base_balance_adjusted * quote_balance_adjusted >= balance_k_old_not_scaled * scale, ERR_K_ERROR)
-        };
-    }
     
     // Get flash swap coins. User can loan any coins, and repay in the same tx.
     // In most cases, user may loan one coin, and repay the same or the other coin.
@@ -351,7 +314,55 @@ module sea::amm {
         pool.locked = false;
     }
 
+    public fun get_pool_reserve_fee<B, Q, F>(): (u64, u64, u64) acquires Pool {
+        let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
+        assert!(pool.locked == false, E_POOL_LOCKED);
+        let base_reserve = coin::value(&pool.base_reserve);
+        let quote_reserve = coin::value(&pool.quote_reserve);
+
+        (base_reserve, quote_reserve, pool.fee)
+    }
+
     // Private functions ====================================================
+
+    // k should not decrease
+    fun assert_k_increase(
+        base_balance: u64,
+        quote_balance: u64,
+        base_in: u64,
+        quote_in: u64,
+        base_reserve: u64,
+        quote_reserve: u64,
+        fee: u64,
+    ) {
+        let base_balance_adjusted = (base_balance as u128) * 10000 - (base_in as u128) * (fee as u128);
+        let quote_balance_adjusted = (quote_balance as u128) * 10000 - (quote_in as u128) * (fee as u128);
+        let balance_k_old_not_scaled = (base_reserve as u128) * (quote_reserve as u128);
+        let scale = 100000000;
+        // should be: new_reserve_x * new_reserve_y > old_reserve_x * old_eserve_y
+        // gas saving
+        if (
+            math::is_overflow_mul(base_balance_adjusted, quote_balance_adjusted)
+            || math::is_overflow_mul(balance_k_old_not_scaled, scale)
+        ) {
+            let balance_xy_adjusted = u256::mul(u256::from_u128(base_balance_adjusted), u256::from_u128(quote_balance_adjusted));
+            let balance_xy_old = u256::mul(u256::from_u128(balance_k_old_not_scaled), u256::from_u128(scale));
+            assert!(u256::compare(&balance_xy_adjusted, &balance_xy_old) == 2, ERR_K_ERROR);
+        } else {
+            assert!(base_balance_adjusted * quote_balance_adjusted >= balance_k_old_not_scaled * scale, ERR_K_ERROR)
+        };
+    }
+
+    fun quote(
+        amount_base: u64,
+        reserve_base: u64,
+        reserve_quote: u64
+    ): u64 {
+        assert!(amount_base > 0, E_INSUFFICIENT_AMOUNT);
+        assert!(reserve_base > 0 && reserve_quote > 0, E_INSUFFICIENT_AMOUNT);
+        ((amount_base as u128) * (reserve_quote as u128) / (reserve_base as u128) as u64)
+    }
+
     fun get_lp_name_symbol<BaseType, QuoteType>(): (String, String) {
         let name = string::utf8(b"");
         string::append_utf8(&mut name, b"LP-");

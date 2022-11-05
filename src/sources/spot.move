@@ -1221,9 +1221,9 @@ module sea::spot {
         let fee: u128 = (
             if (taker_side == BUY) {
                 // buy, fee is base coin
-                (qty as u128) * (fee_ratio as u128) / 1000000
+                (qty as u128) * (fee_ratio as u128) / (fee::get_fee_denominate() as u128) // 1000000
             } else {
-                vol * (fee_ratio as u128) / 1000000
+                vol * (fee_ratio as u128) / (fee::get_fee_denominate() as u128)
             });
         assert!(fee < MAX_U64, E_VOL_EXCEED_MAX_U64);
         ((vol as u64), (fee as u64))
