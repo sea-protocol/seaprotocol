@@ -10,6 +10,7 @@
 /// AMM
 /// 
 module sea::amm {
+    // use std::debug;
     use std::option;
     use std::signer::address_of;
     use std::string::{Self, String};
@@ -27,7 +28,7 @@ module sea::amm {
     friend sea::spot;
 
     // Constants ====================================================
-    const MIN_LIQUIDITY: u64 = 500;
+    const MIN_LIQUIDITY: u64 = 1000;
 
     // Errors ====================================================
     const E_NO_AUTH:                       u64 = 5000;
@@ -44,6 +45,8 @@ module sea::amm {
     const E_INSUFFICIENT_BASE_AMOUNT:      u64 = 5011;
     const E_INSUFFICIENT_QUOTE_AMOUNT:     u64 = 5012;
     const E_INTERNAL_ERROR:                u64 = 5013;
+    const E_AMM_LOCKED:                    u64 = 5014;
+    const E_INVALID_DAO_FEE:               u64 = 5015;
 
     // Pool liquidity pool
     struct Pool<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
@@ -64,6 +67,7 @@ module sea::amm {
     // AMMConfig global AMM config
     struct AMMConfig has key {
         dao_fee: u64, // DAO will take 1/dao_fee from trade fee
+        locked: bool,
     }
 
     // Flashloan flash loan
@@ -73,7 +77,7 @@ module sea::amm {
     }
 
     // initialize
-    fun init_module(sea_admin: &signer) {
+    public entry fun initialize(sea_admin: &signer) {
         // init amm config
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
         assert!(!exists<AMMConfig>(address_of(sea_admin)), E_INITIALIZED);
@@ -81,7 +85,31 @@ module sea::amm {
         // move_to(sea_admin, SpotAccountCapability { signer_cap });
         move_to(sea_admin, AMMConfig {
             dao_fee: 10, // 1/10
+            locked: false,
         });
+    }
+
+    public entry fun set_market_locked(
+        sea_admin: &signer,
+        locked: bool,
+    ) acquires AMMConfig {
+        // init amm config
+        assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
+        let ac = borrow_global_mut<AMMConfig>(@sea);
+
+        ac.locked = locked
+    }
+
+    public entry fun set_market_dao_fee(
+        sea_admin: &signer,
+        dao_fee: u64,
+    ) acquires AMMConfig {
+        // init amm config
+        assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
+        assert!(dao_fee < 50, E_INVALID_DAO_FEE);
+        let ac = borrow_global_mut<AMMConfig>(@sea);
+
+        ac.dao_fee = dao_fee
     }
 
     // create_pool should be called by spot register_pair
@@ -131,10 +159,13 @@ module sea::amm {
     public fun mint<B, Q, F>(
         base: Coin<B>,
         quote: Coin<Q>,
-    ): Coin<LP<B, Q, F>> acquires Pool {
+    ): Coin<LP<B, Q, F>> acquires Pool, AMMConfig {
+        assert_amm_unlocked();
         escrow::validate_pair<B, Q>();
         let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
         assert!(pool.locked == false, E_POOL_LOCKED);
+
+        mint_fee<B, Q, F>(pool);
 
         let total_supply = option::extract(&mut coin::supply<LP<B, Q, F>>());
         let base_reserve = coin::value(&pool.base_reserve);
@@ -143,7 +174,7 @@ module sea::amm {
         let quote_vol = coin::value(&quote);
         let liquidity: u64;
         if (total_supply == 0) {
-            liquidity = math::sqrt((base_reserve as u128) * (quote_reserve as u128));
+            liquidity = math::sqrt((base_vol as u128) * (quote_vol as u128));
             assert!(liquidity > MIN_LIQUIDITY, E_MIN_LIQUIDITY);
             liquidity = liquidity - MIN_LIQUIDITY;
         } else {
@@ -165,11 +196,14 @@ module sea::amm {
 
     public fun burn<B, Q, F>(
         lp: Coin<LP<B, Q, F>>,
-    ): (Coin<B>, Coin<Q>) acquires Pool {
+    ): (Coin<B>, Coin<Q>) acquires Pool, AMMConfig {
+        assert_amm_unlocked();
         escrow::validate_pair<B, Q>();
         let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
         assert!(pool.locked == false, E_POOL_LOCKED);
         let burn_vol = coin::value(&lp);
+
+        mint_fee<B, Q, F>(pool);
 
         let total_supply = option::extract(&mut coin::supply<LP<B, Q, F>>());
         let base_reserve = coin::value(&pool.base_reserve);
@@ -196,7 +230,8 @@ module sea::amm {
         base_out: u64,
         quote_in: Coin<Q>,
         quote_out: u64,
-    ): (Coin<B>, Coin<Q>) acquires Pool {
+    ): (Coin<B>, Coin<Q>) acquires Pool, AMMConfig {
+        assert_amm_unlocked();
         escrow::validate_pair<B, Q>();
         let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
         assert!(pool.locked == false, E_POOL_LOCKED);
@@ -323,6 +358,11 @@ module sea::amm {
 
     // Private functions ====================================================
 
+    fun assert_amm_unlocked() acquires AMMConfig {
+        let ac = borrow_global<AMMConfig>(@sea);
+        assert!(ac.locked == false, E_AMM_LOCKED);
+    }
+
     // k should not decrease
     fun assert_k_increase(
         base_balance: u64,
@@ -333,11 +373,24 @@ module sea::amm {
         quote_reserve: u64,
         fee: u64,
     ) {
+        // debug::print(&base_balance);
+        // debug::print(&quote_balance);
+        // debug::print(&base_in);
+        // debug::print(&quote_in);
+        // debug::print(&base_reserve);
+        // debug::print(&quote_reserve);
+        // debug::print(&fee);
+
         let fee_deno = (fee::get_fee_denominate() as u128);
+        // debug::print(&fee_deno);
         let base_balance_adjusted = (base_balance as u128) * fee_deno - (base_in as u128) * (fee as u128);
         let quote_balance_adjusted = (quote_balance as u128) * fee_deno - (quote_in as u128) * (fee as u128);
         let balance_k_old_not_scaled = (base_reserve as u128) * (quote_reserve as u128);
         let scale = fee_deno * fee_deno;
+        // debug::print(&base_balance_adjusted);
+        // debug::print(&quote_balance_adjusted);
+        // debug::print(&balance_k_old_not_scaled);
+        // debug::print(&scale);
         // should be: new_reserve_x * new_reserve_y > old_reserve_x * old_eserve_y
         // gas saving
         if (
@@ -406,8 +459,8 @@ module sea::amm {
 
     fun mint_fee<B, Q, F>(
         pool: &mut Pool<B, Q, F>,
-        dao_fee: u64,
-    ) {
+    ) acquires AMMConfig {
+        let dao_fee = borrow_global<AMMConfig>(@sea).dao_fee;
         let k_last = pool.k_last;
         let base_reserve = coin::value(&pool.base_reserve);
         let quote_reserve = coin::value(&pool.quote_reserve);

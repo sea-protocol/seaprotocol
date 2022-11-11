@@ -12,6 +12,7 @@ sea_spot = "0xb30051d81a4f9e0303c7c3a31eb1b86d9e7518a5e9845147e2c4f07f12dae7a4"
 user_1 = "0x1111"
 user_2 = "0x2222"
 user_3 = "0x3333"
+user_4 = "0x4444"
 
 [dependencies.SeaInit]
 local = "./sea_init/"
