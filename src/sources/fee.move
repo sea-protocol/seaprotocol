@@ -150,15 +150,16 @@ module sea::fee {
 
         let fee_fixtures = vector<vector<u64>>[
             vector<u64>[1, 0, 1, 0, 1],
-            vector<u64>[2, 1, 1, 0, 2],
-            vector<u64>[3, 2, 1, 1, 2],
-            vector<u64>[4, 3, 1, 1, 3],
-            vector<u64>[5, 4, 1, 2, 3],
-            vector<u64>[6, 5, 1, 2, 4],
-            vector<u64>[7, 6, 1, 2, 5],
-            vector<u64>[8, 7, 1, 3, 5],
-            vector<u64>[9, 8, 1, 3, 6],
-            vector<u64>[10, 9, 1, 4, 6],
+            vector<u64>[2, 0, 2, 0, 2],
+            vector<u64>[3, 1, 2, 0, 3],
+            vector<u64>[4, 1, 3, 0, 4],
+            vector<u64>[5, 2, 3, 0, 5],
+            vector<u64>[6, 2, 4, 0, 6],
+            vector<u64>[7, 2, 5, 0, 7],
+            vector<u64>[8, 3, 5, 0, 8],
+            vector<u64>[9, 3, 6, 0, 9],
+            vector<u64>[10, 4, 6, 0, 10],
+            vector<u64>[50, 20, 30, 2, 48],
         ];
         let i = 0;
         while (i < vector::length(&fee_fixtures)) {

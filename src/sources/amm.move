@@ -23,7 +23,7 @@ module sea::amm {
     
     use sea::fee;
     use sea::escrow;
-    use sea_lp::lp::{LP};
+    use sea_spot::lp::{LP};
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     friend sea::market;

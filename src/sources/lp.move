@@ -9,7 +9,7 @@
 ///
 /// spot AMM LP
 /// 
-module sea_lp::lp {
+module sea_spot::lp {
     // LP token
     struct LP<phantom BaseType, phantom QuoteType> {}
 }

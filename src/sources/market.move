@@ -20,7 +20,7 @@ module sea::market {
     // use aptos_framework::account::{Self, SignerCapability};
     use sealib::rbtree::{Self, RBTree};
     use sealib::math;
-    
+
     use sea::price;
     use sea::utils;
     use sea::fee;
@@ -423,7 +423,6 @@ module sea::market {
             let asks = &mut pair.asks;
             if (!rbtree::is_empty(asks)) {
                 let ask0 = get_best_price(asks);
-                // debug::print(&ask0);
                 assert!(price <= ask0, E_PRICE_TOO_HIGH);
             }
         };
@@ -568,7 +567,6 @@ module sea::market {
             let asks = &mut pair.asks;
             if (!rbtree::is_empty(asks)) {
                 let ask0 = get_best_price(asks);
-                // debug::print(&ask0);
                 assert!(buy_price0 <= ask0, E_PRICE_TOO_HIGH);
             };
             // check_init_taker_escrow<BaseType, QuoteType>(account, BUY);
@@ -936,22 +934,10 @@ module sea::market {
         // frozen
         if (side == SELL) {
             let qty = order.qty;
-            // if (from_escrow) {
-            //     coin::merge(&mut order.base_frozen, escrow::dec_escrow_coin<B>(addr, qty));
-            // } else {
-                coin::merge(&mut order.base_frozen, coin::withdraw(account, qty));
-                // escrow::deposit<B>(account, order.qty, true);
-            // };
+            coin::merge(&mut order.base_frozen, coin::withdraw(account, qty));
         } else {
             let vol = calc_quote_vol_for_buy(order.qty, price, pair.price_ratio);
-            // debug::print(&pair.price_ratio);
-            // debug::print(&vol);
-            // if (from_escrow) {
-            //     coin::merge(&mut order.quote_frozen, escrow::dec_escrow_coin<Q>(addr, vol));
-            // } else {
-                coin::merge(&mut order.quote_frozen, coin::withdraw(account, vol));
-                // escrow::deposit<Q>(account, vol, true);
-            // };
+            coin::merge(&mut order.quote_frozen, coin::withdraw(account, vol));
         };
 
         let order_id = generate_order_id(pair);
@@ -1009,13 +995,12 @@ module sea::market {
                 match_qty = order.qty;
                 // remove this order from orderbook
                 remove_order = true;
-                // debug::print(&10000000000001);
                 // if (order.qty == taker_order.qty) completed = true;
             };
 
             taker_order.qty = taker_order.qty - match_qty;
             order.qty = order.qty - match_qty;
-            // debug::print(&order.qty);
+
             let (quote_vol, fee_amt) = calc_quote_vol(taker_side, match_qty, maker_price, price_ratio, fee_ratio);
             let (fee_maker, fee_plat) = fee::get_maker_fee_shares(fee_amt, order.grid_id > 0);
 
@@ -1030,8 +1015,6 @@ module sea::market {
                 fee_plat,
                 fee_maker);
             if (remove_order) {
-                // debug::print(&10000000000002);
-                // debug::print(&pos);
                 let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
                 // if is grid order, flip it
                 if (pop_order.grid_id > 0) {
@@ -1106,11 +1089,8 @@ module sea::market {
         } else {
             // flip order is BUY order
             let price = maker_price - delta_price;
-            // debug::print(&price);
             // let (qty, remnant) = calc_base_qty_can_buy(coin::value(&quote_frozen), price, price_ratio);
             let quote_needed = calc_quote_vol_for_buy(grid_qty, price, price_ratio);
-            // debug::print(&quote_needed);
-            // debug::print(&remnant);
             let n_quote_frozen = coin::extract(&mut quote_frozen, quote_needed);
             let filp_order = OrderEntity<BaseType, QuoteType> {
                 qty: grid_qty,
@@ -1129,7 +1109,7 @@ module sea::market {
             } else {
                 coin::destroy_zero(quote_frozen);
             };
-            // debug::print(&generate_key(price, order_id));
+
             rbtree::rb_insert(tree, generate_key(price, order_id), filp_order);
         }
     }
@@ -1146,17 +1126,12 @@ module sea::market {
             quote_frozen: quote_frozen,
         } = order;
         let addr = address_of(taker);
-        // debug::print(&33333333333333333);
         if (coin::value(&base_frozen) > 0) {
-            // let addr = escrow::get_account_addr_by_id(account_id);
-            // escrow::incr_escrow_coin<BaseType>(addr, base_frozen);
             coin::deposit(addr, base_frozen);
         } else {
             coin::destroy_zero(base_frozen);
         };
         if (coin::value(&quote_frozen) > 0) {
-            // let addr = escrow::get_account_addr_by_id(account_id);
-            // escrow::incr_escrow_coin<QuoteType>(addr, quote_frozen);
             coin::deposit(addr, quote_frozen);
         } else {
             coin::destroy_zero(quote_frozen);
@@ -1173,7 +1148,7 @@ module sea::market {
             base_frozen: base_frozen,
             quote_frozen: quote_frozen,
         } = order;
-        // debug::print(&222222222222222222);
+
         if (coin::value(&base_frozen) > 0) {
             let addr = escrow::get_account_addr_by_id(account_id);
             // escrow::incr_escrow_coin<BaseType>(addr, base_frozen);
@@ -1511,6 +1486,7 @@ module sea::market {
         register_quote<T_USD>(sea_admin, 10);
         // 2. 
         register_pair<T_BTC, T_USD>(sea_admin, 500, 10000000, 10);
+        // debug::print(&address_of(sea_admin));
 
         let pair = borrow_global_mut<Pair<T_BTC, T_USD>>(@sea_spot);
         pair.price_ratio
@@ -1568,8 +1544,8 @@ module sea::market {
         // check maker user1 assets
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT + 1000000, 0, 2);
         let vol1 = calc_quote_vol_for_buy(150130000000, 1000000, price_ratio);
-        let fee1 = vol1 * 200/1000000;
-        let fee1_maker = fee1 * 400/1000;
+        let fee1 = vol1 * 500/1000000;
+        let fee1_maker = fee1 * 50/1000;
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-vol + fee1_maker, 0, 3); // , vol-vol1);
 
         // check taker user2 assets
@@ -1586,8 +1562,8 @@ module sea::market {
         place_limit_order<T_BTC, T_USD>(user3, SELL, 150130000000, 500000, false, false);
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT + 1500000, 0, 6);
         let vol2 = calc_quote_vol_for_buy(150130000000, 500000, price_ratio);
-        let fee2 = vol2 * 200/1000000;
-        let fee2_maker = fee2 * 400/1000;
+        let fee2 = vol2 * 500/1000000;
+        let fee2_maker = fee2 * 50/1000;
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-vol+fee1_maker+fee2_maker, 0, 7); // , vol-vol1-vol2);
         // check taker user3 assets
         test_check_account_asset<T_BTC>(address_of(user3), T_BTC_AMT-500000, 0, 8);
@@ -1629,8 +1605,8 @@ module sea::market {
         
         place_limit_order<T_BTC, T_USD>(user2, BUY, 150130000000, 1000000, false, false);
         // check maker user1 assets
-        let fee1 = 1000000 * 200/1000000;
-        let fee1_maker = fee1 * 400/1000;
+        let fee1 = 1000000 * 500/1000000;
+        let fee1_maker = fee1 * 50/1000;
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000+fee1_maker, 0, 1002);
         let vol1 = calc_quote_vol_for_buy(150130000000, 1000000, price_ratio);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT+ vol1, 0, 1003);
@@ -1643,8 +1619,8 @@ module sea::market {
         assert!(vector::length(&bids) == 0, 1);
 
         place_limit_order<T_BTC, T_USD>(user3, BUY, 150230000000, 500000, false, false);
-        let fee2 = 500000 * 200/1000000;
-        let fee2_maker = fee2 * 400/1000;
+        let fee2 = 500000 * 500/1000000;
+        let fee2_maker = fee2 * 50/1000;
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000+fee1_maker+fee2_maker, 0, 1006);
         let vol2 = calc_quote_vol_for_buy(150130000000, 500000, price_ratio);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT+ vol1+vol2, 0, 1007);
@@ -1685,8 +1661,8 @@ module sea::market {
         
         place_limit_order<T_BTC, T_USD>(user2, BUY, 150130000000, 1000000, false, false);
         // check maker user1 assets
-        let fee1 = 1000000 * 200/1000000;
-        let fee1_maker = fee1 * 400/1000;
+        let fee1 = 1000000 * 500/1000000;
+        let fee1_maker = fee1 * 50/1000;
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000+ fee1_maker, 0, 2002);
         let vol1 = calc_quote_vol_for_buy(150130000000, 1000000, price_ratio);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT+ vol1, 0, 2003);
@@ -1699,14 +1675,14 @@ module sea::market {
         assert!(vector::length(&bids) == 0, 1);
 
         place_limit_order<T_BTC, T_USD>(user3, BUY, 150230000000, 500010, false, false);
-        let fee2 = 500000 * 200/1000000;
-        let fee2_maker = fee2 * 400/1000;
+        let fee2 = 500000 * 500/1000000;
+        let fee2_maker = fee2 * 50/1000;
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000+ fee1_maker+fee2_maker, 0, 2006);
         let vol2 = calc_quote_vol_for_buy(150130000000, 500000, price_ratio);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT+ vol1+vol2, 0, 2007);
         // check taker user3 assets
         test_check_account_asset<T_BTC>(address_of(user3), T_BTC_AMT+500000-fee2, 0, 2008);
-        // debug::print(&222222222222);
+
         let vol = calc_quote_vol_for_buy(150230000000, 10, price_ratio);
         test_check_account_asset<T_USD>(address_of(user3), T_USD_AMT-vol2-vol, 0, 2009);
 
@@ -1825,7 +1801,7 @@ module sea::market {
         // partial filled
         place_limit_order<T_BTC, T_USD>(user2, SELL, 150130000000, 1000000, false, false);
 
-        let (usd, total_fee) = calc_quote_vol(SELL, 1000000, 150130000000, 10000000, 200);
+        let (usd, total_fee) = calc_quote_vol(SELL, 1000000, 150130000000, 10000000, 500);
         cancel_order<T_BTC, T_USD>(user1, BUY, maker_order_key);
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT+1000000, 0, 40);
         // taker got USD, trade fee is USD, the maker got some trade fee
@@ -1853,7 +1829,7 @@ module sea::market {
         // partial filled
         place_limit_order<T_BTC, T_USD>(user2, BUY, 150130000000, 1000000, false, false);
 
-        let (usd, total_fee) = calc_quote_vol(BUY, 1000000, 150130000000, 10000000, 200);
+        let (usd, total_fee) = calc_quote_vol(BUY, 1000000, 150130000000, 10000000, 500);
 
         cancel_order<T_BTC, T_USD>(user1, SELL, maker_order_key);
 
@@ -1938,8 +1914,8 @@ module sea::market {
         // 150140000000 1500000 s0
         // 150130000000 1500000
         // 150120000000 1500000
-        let (usd1, fee1) = calc_quote_vol(BUY, 1500000, 150150000000, 10000000, 200);
-        let (usd2, fee2) = calc_quote_vol(BUY, 1000000, 150160000000, 10000000, 200);
+        let (usd1, fee1) = calc_quote_vol(BUY, 1500000, 150150000000, 10000000, 500);
+        let (usd2, fee2) = calc_quote_vol(BUY, 1000000, 150160000000, 10000000, 500);
 
         test_check_account_asset<T_BTC>(address_of(user2), T_BTC_AMT+2500000-fee1-fee2, 0, 60);
         test_check_account_asset<T_USD>(address_of(user2), T_USD_AMT-usd1-usd2, 0, 61);
@@ -1992,13 +1968,13 @@ module sea::market {
         // partial filled
         place_limit_order<T_BTC, T_USD>(user2, SELL, 150120000000, 1500000+1000000, false, false);
         let (_, asks, bids) = test_get_pair_price_steps<T_BTC, T_USD>();
-        // debug::print(&vector::length(&asks));
+
         assert!(vector::length(&asks) == 3, 4);
         assert!(vector::length(&bids) == 1, 5);
 
-        let (usd1, fee1) = calc_quote_vol(SELL, 1500000, 150130000000, 10000000, 200);
-        let (usd2, fee2) = calc_quote_vol(SELL, 1000000, 150120000000, 10000000, 200);
-        let (usd3, _) = calc_quote_vol(SELL, 1500000, 150120000000, 10000000, 200);
+        let (usd1, fee1) = calc_quote_vol(SELL, 1500000, 150130000000, 10000000, 500);
+        let (usd2, fee2) = calc_quote_vol(SELL, 1000000, 150120000000, 10000000, 500);
+        let (usd3, _) = calc_quote_vol(SELL, 1500000, 150120000000, 10000000, 500);
 
         test_check_account_asset<T_BTC>(address_of(user2), T_BTC_AMT-2500000, 0, 60);
         test_check_account_asset<T_USD>(address_of(user2), T_USD_AMT+usd1+usd2-fee1-fee2, 0, 61);

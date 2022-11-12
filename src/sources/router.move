@@ -14,7 +14,8 @@ module sea::router {
     use std::debug;
     use aptos_framework::coin::{Self, Coin};
 
-    use sea_lp::lp::{LP};
+    use sea_spot::lp::{LP};
+    
     use sea::amm;
     use sea::escrow;
     use sea::utils;

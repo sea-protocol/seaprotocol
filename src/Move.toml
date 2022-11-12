@@ -6,7 +6,8 @@ version = "0.1.0" # Per SemVer
 sea = "0x20cea9406e2349568c613140a57988290deb709ae14fed30f29320f9b446abbf"
 
 # sea_spot = "0x5e8c5122bd2ce18e45912699613ab527697bf58556815c08ad5463092dd91990"
-sea_spot = "0xb30051d81a4f9e0303c7c3a31eb1b86d9e7518a5e9845147e2c4f07f12dae7a4"
+# sea_spot = "0x38140b684d7ac7e8d9a7f1d693dd0098be7bfef0092fc0730ba2d0688e991069"
+sea_spot = "0xe9d0916444fee21d6cce8409823d9962a304db7889b2cbfd816a7c2561c631d6"
 
 # Mock users for unit tests
 user_1 = "0x1111"
@@ -17,8 +18,8 @@ user_4 = "0x4444"
 [dependencies.SeaInit]
 local = "./sea_init/"
 
-[dependencies.SeaLP]
-local = "./sea_lp/"
+# [dependencies.SeaLP]
+# local = "./sea_lp/"
 
 [dependencies.SeaLib]
 local = "./sea_lib/"

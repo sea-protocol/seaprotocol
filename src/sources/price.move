@@ -23,7 +23,7 @@ module sea::price {
     const MAX_EFFECTIVE_DIGITS: u128 = 1000000;
     const MAX_U64: u128 = 0xffffffffffffffff;
     // 64 bit
-    const ORDER_ID_MASK: u128 = 0xffffffffffffffffffffffffffffffff;
+    const ORDER_ID_MASK: u128 = 0xffffffffffffffff;
 
     public fun get_price_order_id(v: u128): (u64, u64) {
         (((v >> 64) as u64), ((v & ORDER_ID_MASK) as u64))

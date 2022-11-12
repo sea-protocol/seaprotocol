@@ -8,7 +8,7 @@ module sea::test_amm {
     use sea::router;
     // use sea::fee::FeeRatio500;
     use sea::test_env::{Self, T_BTC, T_USDC};
-    use sea_lp::lp::{LP};
+    use sea_spot::lp::{LP};
 
     const T_BTC_PRECISION:  u64 = 100000000;
     const T_USDC_PRECISION: u64 = 1000000;
