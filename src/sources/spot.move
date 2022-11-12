@@ -115,8 +115,8 @@ module sea::spot {
 
     struct QuoteConfig<phantom QuoteType> has key {
         quote_id: u64,
-        tick_size: u64,
         min_notional: u64,
+        // tick_size: u64,
         // quote: Coin<QuoteType>,
     }
 
@@ -228,7 +228,7 @@ module sea::spot {
     /// register_quote only the admin can register quote coin
     public fun register_quote<QuoteType>(
         account: &signer,
-        tick_size: u64,
+        // tick_size: u64,
         min_notional: u64,
     ) {
         assert!(address_of(account) == @sea, E_NO_AUTH);
@@ -237,7 +237,7 @@ module sea::spot {
 
         move_to(account, QuoteConfig<QuoteType>{
             quote_id: quote_id,
-            tick_size: tick_size,
+            // tick_size: tick_size,
             min_notional: min_notional,     
             // quote: quote,
         })
@@ -1494,7 +1494,7 @@ module sea::spot {
         test_prepare_account_env(sea_admin);
         test_init_coins_and_accounts(sea_admin, user1, user2, user3);
         // 1. register quote
-        register_quote<T_USD>(sea_admin, 10, 10);
+        register_quote<T_USD>(sea_admin, 10);
         // 2. 
         register_pair<T_BTC, T_USD, fee::FeeRatio200>(sea_admin, 10000000, 10);
 
@@ -1508,7 +1508,7 @@ module sea::spot {
     ) {
         test_prepare_account_env(sea_admin);
         // 1. register quote
-        register_quote<T_USD>(sea_admin, 10, 10);
+        register_quote<T_USD>(sea_admin, 10);
     }
 
     #[test(sea_admin = @sea)]
@@ -1518,9 +1518,9 @@ module sea::spot {
     ) {
         test_prepare_account_env(sea_admin);
         // 1. register quote
-        register_quote<T_USD>(sea_admin, 10, 10);
+        register_quote<T_USD>(sea_admin, 10);
         // 2. 
-        register_quote<T_USD>(sea_admin, 10, 10);
+        register_quote<T_USD>(sea_admin, 10);
     }
 
     #[test(

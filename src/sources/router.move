@@ -11,6 +11,7 @@
 /// 
 module sea::router {
     use std::signer::address_of;
+    use std::debug;
     use aptos_framework::coin::{Self, Coin};
 
     use sea_lp::lp::{LP};
@@ -25,7 +26,10 @@ module sea::router {
     const E_INSUFFICIENT_QUOTE_AMOUNT:            u64 = 7002;
     const E_INSUFFICIENT_AMOUNT:                  u64 = 7003;
     const E_INVALID_AMOUNT_OUT:                   u64 = 7004;
-    const E_INSUFFICIENT_LIQUIDITY:               u64 = 7005;
+    const E_INVALID_AMOUNT_IN:                    u64 = 7005;
+    const E_INSUFFICIENT_LIQUIDITY:               u64 = 7006;
+    const E_INSUFFICIENT_QUOTE_RESERVE:           u64 = 7007;
+    const E_INSUFFICIENT_BASE_RESERVE:            u64 = 7008;
 
     public entry fun add_liquidity<B, Q, F>(
         account: &signer,
@@ -72,8 +76,10 @@ module sea::router {
         coin::deposit(account_addr, quote_out);
     }
 
-    // sell base
-    public entry fun swap_base_for_exact_quote<B, Q, F>(
+    // user: buy exact quote
+    // amount_out: quote amount out of pool
+    // amount_in_max: base amount into pool
+    public entry fun buy_exact_quote<B, Q, F>(
         account: &signer,
         amount_out: u64,
         amount_in_max: u64
@@ -87,8 +93,8 @@ module sea::router {
         coin::deposit<Q>(address_of(account), coin_out);
     }
 
-    // sell base
-    public entry fun swap_exact_base_for_quote<B, Q, F>(
+    // user: sell base
+    public entry fun sell_exact_base<B, Q, F>(
         account: &signer,
         amount_in: u64,
         amount_out_min: u64
@@ -101,8 +107,9 @@ module sea::router {
         coin::deposit<Q>(address_of(account), coin_out);
     }
 
-    // buy base
-    public entry fun swap_quote_for_exact_base<B, Q, F>(
+    // user: buy base
+    // amount_out: the exact base amount
+    public entry fun buy_exact_base<B, Q, F>(
         account: &signer,
         amount_out: u64,
         amount_in_max: u64
@@ -116,8 +123,8 @@ module sea::router {
         coin::deposit<B>(address_of(account), coin_out);
     }
 
-    // buy base
-    public entry fun swap_exact_quote_for_base<B, Q, F>(
+    // user: sell exact quote
+    public entry fun sell_exact_quote<B, Q, F>(
         account: &signer,
         amount_in: u64,
         amount_out_min: u64
@@ -163,6 +170,7 @@ module sea::router {
         coin_out
     }
 
+    /// out_is_base: in user perspective
     public fun get_amount_in<B, Q, F>(
         amount_out: u64,
         out_is_base: bool,
@@ -175,13 +183,41 @@ module sea::router {
         let denominator: u128;
         let fee_deno = fee::get_fee_denominate();
         if (out_is_base) {
-            numerator = (base_reserve as u128) * (amount_out as u128) * (fee_deno as u128);
-            denominator = ((quote_reserve - amount_out) as u128) * ((fee_deno - fee_ratio) as u128);
-        } else {
+            assert!(base_reserve > amount_out, E_INSUFFICIENT_BASE_RESERVE);
             numerator = (quote_reserve as u128) * (amount_out as u128) * (fee_deno as u128);
             denominator = ((base_reserve - amount_out) as u128) * ((fee_deno - fee_ratio) as u128);
+        } else {
+            assert!(quote_reserve > amount_out, E_INSUFFICIENT_QUOTE_RESERVE);
+            numerator = (base_reserve as u128) * (amount_out as u128) * (fee_deno as u128);
+            denominator = ((quote_reserve - amount_out) as u128) * ((fee_deno - fee_ratio) as u128);
         };
 
+        debug::print(&denominator);
         ((numerator / denominator + 1) as u64)
+    }
+
+    public fun get_amount_out<B, Q, F>(
+        amount_in: u64,
+        out_is_quote: bool,
+    ): u64 {
+        assert!(amount_in > 0, E_INVALID_AMOUNT_IN);
+        let (base_reserve, quote_reserve, fee_ratio) = amm::get_pool_reserve_fee<B, Q, F>();
+        assert!(base_reserve > 0 && quote_reserve > 0, E_INSUFFICIENT_LIQUIDITY);
+
+        let fee_deno = fee::get_fee_denominate();
+        let amount_in_with_fee = (amount_in as u128) * ((fee_deno - fee_ratio) as u128);
+        let numerator: u128;
+        let denominator: u128;
+        if (out_is_quote) {
+            numerator = amount_in_with_fee * (quote_reserve as u128);
+            denominator = (base_reserve as u128) * (fee_deno as u128) + amount_in_with_fee;
+        } else {
+            numerator = amount_in_with_fee * (base_reserve as u128);
+            denominator = (quote_reserve as u128) * (fee_deno as u128) + amount_in_with_fee;
+        };
+
+        let amount_out = numerator / denominator;
+        // debug::print(&amount_out);
+        (amount_out as u64)
     }
 }
