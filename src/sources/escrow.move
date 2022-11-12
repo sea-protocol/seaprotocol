@@ -18,7 +18,7 @@ module sea::escrow {
     use sea::spot_account;
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    friend sea::spot;
+    friend sea::market;
     friend sea::amm;
     friend sea::router;
 

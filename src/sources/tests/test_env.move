@@ -9,7 +9,7 @@ module sea::test_env {
     use aptos_framework::account;
     use aptos_framework::aptos_account;
 
-    use sea::spot;
+    use sea::market;
     use sea::fee;
     use sea::amm;
     use sea::escrow;
@@ -72,16 +72,17 @@ module sea::test_env {
     public fun create_quote<Q>(
         sea_admin: &signer,
         min_notional: u64) {
-        spot::register_quote<Q>(sea_admin, min_notional);
+        market::register_quote<Q>(sea_admin, min_notional);
     }
 
     // before create pairs, you should create quotes first
-    public fun create_test_pairs<B, Q, F>(
+    public fun create_test_pairs<B, Q>(
         sea_admin: &signer,
+        fee_level: u64,
         price_coefficient: u64,
         lot_size: u64,
         ) {
-        spot::register_pair<B, Q, F>(sea_admin, price_coefficient, lot_size);
+        market::register_pair<B, Q>(sea_admin, fee_level, price_coefficient, lot_size);
     }
     
     fun prepare_env(
@@ -92,7 +93,7 @@ module sea::test_env {
         account::create_account_for_test(@sea_spot);
 
         spot_account::initialize_spot_account(sea_admin);
-        spot::initialize(sea_admin);
+        market::initialize(sea_admin);
         escrow::initialize(sea_admin);
         fee::initialize(sea_admin);
         amm::initialize(sea_admin);
@@ -127,15 +128,15 @@ module sea::test_env {
         create_quote<T_BTC>(sea_admin, 10000);
 
         // create pair: BTC/USDC
-        create_test_pairs<T_BTC, T_USDC, fee::FeeRatio500>(sea_admin, 1000000, 10000);  // lot_size sea: 0.00001
-        create_test_pairs<T_BTC, T_USDT, fee::FeeRatio500>(sea_admin, 1000000, 10000); 
-        create_test_pairs<T_ETH, T_USDC, fee::FeeRatio500>(sea_admin, 1000000, 100000); // lot_size eth: 0.001
-        create_test_pairs<T_ETH, T_USDT, fee::FeeRatio500>(sea_admin, 1000000, 100000);
-        create_test_pairs<T_ETH, T_BTC, fee::FeeRatio500>(sea_admin, 100000000, 1000);
-        create_test_pairs<T_SEA, T_USDC, fee::FeeRatio500>(sea_admin, 100000000, 1000);  // lot_size sea: 0.001
-        create_test_pairs<T_SEA, T_USDT, fee::FeeRatio500>(sea_admin, 100000000, 1000);
-        create_test_pairs<T_SEA, T_BTC, fee::FeeRatio500>(sea_admin, 100000000, 1000);
+        create_test_pairs<T_BTC, T_USDC>(sea_admin, 500, 1000000, 10000);  // lot_size sea: 0.00001
+        create_test_pairs<T_BTC, T_USDT>(sea_admin, 500, 1000000, 10000); 
+        create_test_pairs<T_ETH, T_USDC>(sea_admin, 500, 1000000, 100000); // lot_size eth: 0.001
+        create_test_pairs<T_ETH, T_USDT>(sea_admin, 500, 1000000, 100000);
+        create_test_pairs<T_ETH, T_BTC>(sea_admin, 500, 100000000, 1000);
+        create_test_pairs<T_SEA, T_USDC>(sea_admin, 500, 100000000, 1000);  // lot_size sea: 0.001
+        create_test_pairs<T_SEA, T_USDT>(sea_admin, 500, 100000000, 1000);
+        create_test_pairs<T_SEA, T_BTC>(sea_admin, 500, 100000000, 1000);
 
-        create_test_pairs<T_USDT, T_USDC, fee::FeeRatio200>(sea_admin, 1000000, 100); // lot_size: 0.01
+        create_test_pairs<T_USDT, T_USDC>(sea_admin, 500, 1000000, 100); // lot_size: 0.01
     }
 }

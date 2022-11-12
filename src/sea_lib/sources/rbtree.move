@@ -23,7 +23,7 @@
 /// https://github.com/torvalds/linux/blob/master/include/linux/rbtree_types.h
 /// https://github.com/tickbh/rbtree-rs
 /// 
-module sea::rbtree {
+module sealib::rbtree {
     use std::vector;
     use std::debug;
 

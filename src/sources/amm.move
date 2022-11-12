@@ -19,13 +19,14 @@ module sea::amm {
     use u256::u256;
     use uq64x64::uq64x64;
 
+    use sealib::math;
+    
     use sea::fee;
-    use sea::math;
     use sea::escrow;
     use sea_lp::lp::{LP};
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    friend sea::spot;
+    friend sea::market;
 
     // Constants ====================================================
     const MIN_LIQUIDITY: u64 = 1000;
@@ -47,9 +48,10 @@ module sea::amm {
     const E_INTERNAL_ERROR:                u64 = 5013;
     const E_AMM_LOCKED:                    u64 = 5014;
     const E_INVALID_DAO_FEE:               u64 = 5015;
+    const E_POOL_EXISTS:                   u64 = 5016;
 
     // Pool liquidity pool
-    struct Pool<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
+    struct Pool<phantom BaseType, phantom QuoteType> has key {
         base_id: u64,
         quote_id: u64,
         base_reserve: Coin<BaseType>,
@@ -58,10 +60,11 @@ module sea::amm {
         last_price_x_cumulative: u128,
         last_price_y_cumulative: u128,
         k_last: u128,
-        lp_mint_cap: coin::MintCapability<LP<BaseType, QuoteType, FeeRatio>>,
-        lp_burn_cap: coin::BurnCapability<LP<BaseType, QuoteType, FeeRatio>>,
+        lp_mint_cap: coin::MintCapability<LP<BaseType, QuoteType>>,
+        lp_burn_cap: coin::BurnCapability<LP<BaseType, QuoteType>>,
         locked: bool,
         fee: u64,
+        mining_weight: u64,
     }
 
     // AMMConfig global AMM config
@@ -113,7 +116,7 @@ module sea::amm {
     }
 
     // create_pool should be called by spot register_pair
-    public(friend) fun create_pool<B, Q, F>(
+    public(friend) fun create_pool<B, Q>(
         res_account: &signer,
         base_id: u64,
         quote_id: u64,
@@ -121,7 +124,7 @@ module sea::amm {
     ) {
         let (name, symbol) = get_lp_name_symbol<B, Q>();
         let (lp_burn_cap, lp_freeze_cap, lp_mint_cap) =
-            coin::initialize<LP<B, Q, F>>(
+            coin::initialize<LP<B, Q>>(
                 res_account,
                 name,
                 symbol,
@@ -130,7 +133,8 @@ module sea::amm {
             );
         coin::destroy_freeze_cap(lp_freeze_cap);
 
-        let pool = Pool<B, Q, F> {
+        assert!(!exists<Pool<B, Q>>(address_of(res_account)), E_POOL_EXISTS);
+        let pool = Pool<B, Q> {
             base_id: base_id,
             quote_id: quote_id,
             base_reserve: coin::zero<B>(),
@@ -143,31 +147,42 @@ module sea::amm {
             lp_burn_cap,
             locked: false,
             fee: fee,
+            mining_weight: 0,
         };
         move_to(res_account, pool);
-        coin::register<LP<B, Q, F>>(res_account);
+        coin::register<LP<B, Q>>(res_account);
+    }
+
+    public entry fun modify_pool_fee<B, Q>(
+        sea_admin: &signer,
+        fee_level: u64) acquires Pool {
+        assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
+        fee::assert_fee_level_valid(fee_level);
+        let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
+
+        pool.fee = fee_level;
     }
 
     public fun get_min_liquidity(): u64 {
         MIN_LIQUIDITY
     }
     
-    public fun pool_exist<B, Q, F>(): bool {
-        exists<Pool<B, Q, F>>(@sea_spot)
+    public fun pool_exist<B, Q>(): bool {
+        exists<Pool<B, Q>>(@sea_spot)
     }
 
-    public fun mint<B, Q, F>(
+    public fun mint<B, Q>(
         base: Coin<B>,
         quote: Coin<Q>,
-    ): Coin<LP<B, Q, F>> acquires Pool, AMMConfig {
+    ): Coin<LP<B, Q>> acquires Pool, AMMConfig {
         assert_amm_unlocked();
         escrow::validate_pair<B, Q>();
-        let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
+        let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
         assert!(pool.locked == false, E_POOL_LOCKED);
 
-        mint_fee<B, Q, F>(pool);
+        mint_fee<B, Q>(pool);
 
-        let total_supply = option::extract(&mut coin::supply<LP<B, Q, F>>());
+        let total_supply = option::extract(&mut coin::supply<LP<B, Q>>());
         let base_reserve = coin::value(&pool.base_reserve);
         let quote_reserve = coin::value(&pool.quote_reserve);
         let base_vol = coin::value(&base);
@@ -187,25 +202,25 @@ module sea::amm {
         coin::merge(&mut pool.base_reserve, base);
         coin::merge(&mut pool.quote_reserve, quote);
 
-        let lp = coin::mint<LP<B, Q, F>>(liquidity, &pool.lp_mint_cap);
+        let lp = coin::mint<LP<B, Q>>(liquidity, &pool.lp_mint_cap);
         update_pool(pool, base_reserve, quote_reserve);
         pool.k_last = (base_reserve as u128) * (quote_reserve as u128);
 
         lp
     }
 
-    public fun burn<B, Q, F>(
-        lp: Coin<LP<B, Q, F>>,
+    public fun burn<B, Q>(
+        lp: Coin<LP<B, Q>>,
     ): (Coin<B>, Coin<Q>) acquires Pool, AMMConfig {
         assert_amm_unlocked();
         escrow::validate_pair<B, Q>();
-        let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
+        let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
         assert!(pool.locked == false, E_POOL_LOCKED);
         let burn_vol = coin::value(&lp);
 
-        mint_fee<B, Q, F>(pool);
+        mint_fee<B, Q>(pool);
 
-        let total_supply = option::extract(&mut coin::supply<LP<B, Q, F>>());
+        let total_supply = option::extract(&mut coin::supply<LP<B, Q>>());
         let base_reserve = coin::value(&pool.base_reserve);
         let quote_reserve = coin::value(&pool.quote_reserve);
 
@@ -218,14 +233,14 @@ module sea::amm {
         let base_coin_to_return = coin::extract(&mut pool.base_reserve, base_to_return_val);
         let quote_coin_to_return = coin::extract(&mut pool.quote_reserve, quote_to_return_val);
 
-        update_pool<B, Q, F>(pool, base_reserve, quote_reserve);
+        update_pool<B, Q>(pool, base_reserve, quote_reserve);
         coin::burn(lp, &pool.lp_burn_cap);
         // todo mint LP fee to admin
 
         (base_coin_to_return, quote_coin_to_return)
     }
 
-    public fun swap<B, Q, F>(
+    public fun swap<B, Q>(
         base_in: Coin<B>,
         base_out: u64,
         quote_in: Coin<Q>,
@@ -233,7 +248,7 @@ module sea::amm {
     ): (Coin<B>, Coin<Q>) acquires Pool, AMMConfig {
         assert_amm_unlocked();
         escrow::validate_pair<B, Q>();
-        let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
+        let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
         assert!(pool.locked == false, E_POOL_LOCKED);
         assert!(base_out > 0 || quote_out > 0, E_INSUFFICIENT_OUTPUT_AMOUNT);
 
@@ -262,13 +277,13 @@ module sea::amm {
     }
 
     /// Calculate optimal amounts of coins to add
-    public fun calc_optimal_coin_values<B, Q, F>(
+    public fun calc_optimal_coin_values<B, Q>(
         amount_base_desired: u64,
         amount_quote_desired: u64,
         amount_base_min: u64,
         amount_quote_min: u64
     ): (u64, u64) acquires Pool {
-        let pool = borrow_global<Pool<B, Q, F>>(@sea_spot);
+        let pool = borrow_global<Pool<B, Q>>(@sea_spot);
         let (reserve_base, reserve_quote) = (coin::value(&pool.base_reserve), coin::value(&pool.quote_reserve));
         if (reserve_base == 0 && reserve_quote == 0) {
             (amount_base_desired, amount_quote_desired)
@@ -292,7 +307,7 @@ module sea::amm {
     // * `loan_coin_x` - expected amount of X coins to loan.
     // * `loan_coin_y` - expected amount of Y coins to loan.
     // Returns both loaned X and Y coins: `(Coin<XBaseType>, Coin<QuoteType>, Flashloan<BaseType, QuoteType)`.
-    public fun flash_swap<B, Q, F>(
+    public fun flash_swap<B, Q>(
         loan_coin_x: u64,
         loan_coin_y: u64
     ): (Coin<B>, Coin<Q>, Flashloan<B, Q>) acquires Pool {
@@ -300,7 +315,7 @@ module sea::amm {
         escrow::validate_pair<B, Q>();
         assert!(loan_coin_x > 0 || loan_coin_y > 0, E_INVALID_LOAN_PARAM);
 
-        let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
+        let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
         assert!(pool.locked == false, E_POOL_LOCKED);
         assert!(coin::value(&pool.base_reserve) >= loan_coin_x &&
             coin::value(&pool.quote_reserve) >= loan_coin_y, E_INSUFFICIENT_AMOUNT);
@@ -313,7 +328,7 @@ module sea::amm {
         (x_loan, y_loan, Flashloan<B, Q> {x_loan: loan_coin_x, y_loan: loan_coin_y})
     }
 
-    public fun pay_flash_swap<B, Q, F>(
+    public fun pay_flash_swap<B, Q>(
         base_in: Coin<B>,
         quote_in: Coin<Q>,
         flash_loan: Flashloan<B, Q>
@@ -327,7 +342,7 @@ module sea::amm {
 
         assert!(amount_base_in > 0 || amount_quote_in > 0, E_PAY_LOAN_ERROR);
 
-        let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
+        let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
         let base_reserve = coin::value(&pool.base_reserve);
         let quote_reserve = coin::value(&pool.quote_reserve);
 
@@ -347,8 +362,8 @@ module sea::amm {
         pool.locked = false;
     }
 
-    public fun get_pool_reserve_fee<B, Q, F>(): (u64, u64, u64) acquires Pool {
-        let pool = borrow_global_mut<Pool<B, Q, F>>(@sea_spot);
+    public fun get_pool_reserve_fee<B, Q>(): (u64, u64, u64) acquires Pool {
+        let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
         assert!(pool.locked == false, E_POOL_LOCKED);
         let base_reserve = coin::value(&pool.base_reserve);
         let quote_reserve = coin::value(&pool.quote_reserve);
@@ -436,8 +451,8 @@ module sea::amm {
         string::sub_string(&symbol, 0, prefix_length)
     }
 
-    fun update_pool<B, Q, F>(
-        pool: &mut Pool<B, Q, F>,
+    fun update_pool<B, Q>(
+        pool: &mut Pool<B, Q>,
         base_reserve: u64,
         quote_reserve: u64,
     ) {
@@ -457,8 +472,8 @@ module sea::amm {
         pool.last_timestamp = now_ts;
     }
 
-    fun mint_fee<B, Q, F>(
-        pool: &mut Pool<B, Q, F>,
+    fun mint_fee<B, Q>(
+        pool: &mut Pool<B, Q>,
     ) acquires AMMConfig {
         let dao_fee = borrow_global<AMMConfig>(@sea).dao_fee;
         let k_last = pool.k_last;
@@ -468,7 +483,7 @@ module sea::amm {
         if (k_last != 0) {
             let root_k = math::sqrt((base_reserve as u128) * (quote_reserve as u128));
             let root_k_last = math::sqrt(k_last);
-            let total_supply = option::extract(&mut coin::supply<LP<B, Q, F>>());
+            let total_supply = option::extract(&mut coin::supply<LP<B, Q>>());
             if (root_k > root_k_last) {
                 let delta_k = ((root_k - root_k_last) as u128);
                 let liquidity;
@@ -482,7 +497,7 @@ module sea::amm {
                     liquidity = ((numerator / denominator) as u64);
                 };
                 if (liquidity > 0) {
-                    let coins = coin::mint<LP<B, Q, F>>(liquidity, &pool.lp_mint_cap);
+                    let coins = coin::mint<LP<B, Q>>(liquidity, &pool.lp_mint_cap);
                     coin::deposit(@sea_spot, coins);
                 }
             }

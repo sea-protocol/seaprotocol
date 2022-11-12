@@ -15,8 +15,9 @@ module sea::mining {
 
     use sea::sea;
 
-    // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    friend sea::spot;
+    // Friends ====================================================
+    friend sea::market;
+    friend sea::amm;
 
     // Structs ====================================================
 
@@ -36,8 +37,7 @@ module sea::mining {
     const E_MINT_DISABLED:      u64 = 900;
     const E_NOT_ENOUGH_SEA:     u64 = 901;
 
-    // Public functions ====================================================
-    public entry fun init_module(
+    fun init_module(
         sender: &signer,
     ) {
         assert!(address_of(sender) == @sea, 1);
@@ -51,6 +51,7 @@ module sea::mining {
         });
     }
 
+    // Public functions ====================================================
     // when place order, we should initialize user's mint info
     public fun init_user_mint_info(
         account: &signer,
@@ -94,6 +95,26 @@ module sea::mining {
             let  maker_info = borrow_global_mut<UserMintInfo>(maker);
             maker_info.volume = maker_info.volume + vol;
             pool_info.total_volume = pool_info.total_volume + vol;
+        };
+
+        let addr = address_of(taker);
+        pool_info.total_volume = pool_info.total_volume + vol;
+        if (!exists<UserMintInfo>(addr)) {
+            move_to(taker, UserMintInfo {
+                volume: vol
+            });
+            return
+        };
+        let info = borrow_global_mut<UserMintInfo>(addr);
+        info.volume = info.volume + vol;
+    }
+
+    public(friend) fun on_swap(
+        taker: &signer,
+        vol: u64) acquires UserMintInfo, PoolMintInfo {
+        let pool_info = borrow_global_mut<PoolMintInfo>(@sea);
+        if (!pool_info.enabled) {
+            return
         };
 
         let addr = address_of(taker);

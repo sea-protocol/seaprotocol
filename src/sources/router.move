@@ -31,41 +31,41 @@ module sea::router {
     const E_INSUFFICIENT_QUOTE_RESERVE:           u64 = 7007;
     const E_INSUFFICIENT_BASE_RESERVE:            u64 = 7008;
 
-    public entry fun add_liquidity<B, Q, F>(
+    public entry fun add_liquidity<B, Q>(
         account: &signer,
         amt_base_desired: u64,
         amt_quote_desired: u64,
         amt_base_min: u64,
         amt_quote_min: u64
     ) {
-        assert!(amm::pool_exist<B, Q, F>(), E_POOL_NOT_EXIST);
+        assert!(amm::pool_exist<B, Q>(), E_POOL_NOT_EXIST);
 
         let (amount_base,
-            amount_quote) = amm::calc_optimal_coin_values<B, Q, F>(
+            amount_quote) = amm::calc_optimal_coin_values<B, Q>(
                 amt_base_desired,
                 amt_quote_desired,
                 amt_base_min,
                 amt_quote_min);
         let coin_base = coin::withdraw<B>(account, amount_base);
         let coin_quote = coin::withdraw<Q>(account, amount_quote);
-        let lp_coins = amm::mint<B, Q, F>(coin_base, coin_quote);
+        let lp_coins = amm::mint<B, Q>(coin_base, coin_quote);
 
         let acc_addr = address_of(account);
-        if (!coin::is_account_registered<LP<B, Q, F>>(acc_addr)) {
-            coin::register<LP<B, Q, F>>(account);
+        if (!coin::is_account_registered<LP<B, Q>>(acc_addr)) {
+            coin::register<LP<B, Q>>(account);
         };
         coin::deposit(acc_addr, lp_coins);
     }
 
-    public entry fun remove_liquidity<B, Q, F>(
+    public entry fun remove_liquidity<B, Q>(
         account: &signer,
         liquidity: u64,
         amt_base_min: u64,
         amt_quote_min: u64,
     ) {
-        assert!(amm::pool_exist<B, Q, F>(), E_POOL_NOT_EXIST);
-        let coins = coin::withdraw<LP<B, Q, F>>(account, liquidity);
-        let (base_out, quote_out) = amm::burn<B, Q, F>(coins);
+        assert!(amm::pool_exist<B, Q>(), E_POOL_NOT_EXIST);
+        let coins = coin::withdraw<LP<B, Q>>(account, liquidity);
+        let (base_out, quote_out) = amm::burn<B, Q>(coins);
 
         assert!(coin::value(&base_out) >= amt_base_min, E_INSUFFICIENT_BASE_AMOUNT);
         assert!(coin::value(&quote_out) >= amt_quote_min, E_INSUFFICIENT_QUOTE_AMOUNT);
@@ -79,29 +79,29 @@ module sea::router {
     // user: buy exact quote
     // amount_out: quote amount out of pool
     // amount_in_max: base amount into pool
-    public entry fun buy_exact_quote<B, Q, F>(
+    public entry fun buy_exact_quote<B, Q>(
         account: &signer,
         amount_out: u64,
         amount_in_max: u64
         ) {
-        let coin_in_needed = get_amount_in<B, Q, F>(amount_out, false);
+        let coin_in_needed = get_amount_in<B, Q>(amount_out, false);
         assert!(coin_in_needed <= amount_in_max, E_INSUFFICIENT_BASE_AMOUNT);
         let coin_in = coin::withdraw<B>(account, coin_in_needed);
         let coin_out;
-        coin_out = swap_base_for_quote<B, Q, F>(coin_in, amount_out);
+        coin_out = swap_base_for_quote<B, Q>(coin_in, amount_out);
         utils::register_coin_if_not_exist<Q>(account);
         coin::deposit<Q>(address_of(account), coin_out);
     }
 
     // user: sell base
-    public entry fun sell_exact_base<B, Q, F>(
+    public entry fun sell_exact_base<B, Q>(
         account: &signer,
         amount_in: u64,
         amount_out_min: u64
         ) {
         let coin_in = coin::withdraw<B>(account, amount_in);
         let coin_out;
-        coin_out = swap_base_for_quote<B, Q, F>(coin_in, amount_out_min);
+        coin_out = swap_base_for_quote<B, Q>(coin_in, amount_out_min);
         assert!(coin::value(&coin_out) >= amount_out_min, E_INSUFFICIENT_QUOTE_AMOUNT);
         utils::register_coin_if_not_exist<Q>(account);
         coin::deposit<Q>(address_of(account), coin_out);
@@ -109,74 +109,74 @@ module sea::router {
 
     // user: buy base
     // amount_out: the exact base amount
-    public entry fun buy_exact_base<B, Q, F>(
+    public entry fun buy_exact_base<B, Q>(
         account: &signer,
         amount_out: u64,
         amount_in_max: u64
         ) {
-        let coin_in_needed = get_amount_in<B, Q, F>(amount_out, true);
+        let coin_in_needed = get_amount_in<B, Q>(amount_out, true);
         assert!(coin_in_needed <= amount_in_max, E_INSUFFICIENT_BASE_AMOUNT);
         let coin_in = coin::withdraw<Q>(account, coin_in_needed);
         let coin_out;
-        coin_out = swap_quote_for_base<B, Q, F>(coin_in, amount_out);
+        coin_out = swap_quote_for_base<B, Q>(coin_in, amount_out);
         utils::register_coin_if_not_exist<B>(account);
         coin::deposit<B>(address_of(account), coin_out);
     }
 
     // user: sell exact quote
-    public entry fun sell_exact_quote<B, Q, F>(
+    public entry fun sell_exact_quote<B, Q>(
         account: &signer,
         amount_in: u64,
         amount_out_min: u64
         ) {
         let coin_in = coin::withdraw<Q>(account, amount_in);
         let coin_out;
-        coin_out = swap_quote_for_base<B, Q, F>(coin_in, amount_out_min);
+        coin_out = swap_quote_for_base<B, Q>(coin_in, amount_out_min);
         assert!(coin::value(&coin_out) >= amount_out_min, E_INSUFFICIENT_QUOTE_AMOUNT);
         utils::register_coin_if_not_exist<B>(account);
         coin::deposit<B>(address_of(account), coin_out);
     }
 
-    public entry fun withdraw_dao_fee<B, Q, F>(
+    public entry fun withdraw_dao_fee<B, Q>(
         account: &signer,
         to: address
     ) {
         assert!(address_of(account) == @sea, E_NO_AUTH);
 
-        let amount = coin::balance<LP<B, Q, F>>(@sea_spot) - amm::get_min_liquidity();
+        let amount = coin::balance<LP<B, Q>>(@sea_spot) - amm::get_min_liquidity();
         assert!(amount > 0, E_INSUFFICIENT_AMOUNT);
-        coin::transfer<LP<B, Q, F>>(&escrow::get_spot_account(), to, amount);
+        coin::transfer<LP<B, Q>>(&escrow::get_spot_account(), to, amount);
     }
 
     // sell base, buy quote
-    public fun swap_base_for_quote<B, Q, F>(
+    public fun swap_base_for_quote<B, Q>(
         coin_in: Coin<B>,
         coin_out_val: u64
     ): Coin<Q> {
-        let (zero, coin_out) = amm::swap<B, Q, F>(coin_in, 0, coin::zero(), coin_out_val);
+        let (zero, coin_out) = amm::swap<B, Q>(coin_in, 0, coin::zero(), coin_out_val);
         coin::destroy_zero(zero);
 
         coin_out
     }
 
     // sell quote, buy base
-    public fun swap_quote_for_base<B, Q, F>(
+    public fun swap_quote_for_base<B, Q>(
         coin_in: Coin<Q>,
         coin_out_val: u64,
     ): Coin<B> {
-        let (coin_out, zero) = amm::swap<B, Q, F>(coin::zero(), coin_out_val, coin_in, 0);
+        let (coin_out, zero) = amm::swap<B, Q>(coin::zero(), coin_out_val, coin_in, 0);
         coin::destroy_zero(zero);
 
         coin_out
     }
 
     /// out_is_base: in user perspective
-    public fun get_amount_in<B, Q, F>(
+    public fun get_amount_in<B, Q>(
         amount_out: u64,
         out_is_base: bool,
     ): u64 {
         assert!(amount_out > 0, E_INVALID_AMOUNT_OUT);
-        let (base_reserve, quote_reserve, fee_ratio) = amm::get_pool_reserve_fee<B, Q, F>();
+        let (base_reserve, quote_reserve, fee_ratio) = amm::get_pool_reserve_fee<B, Q>();
         assert!(base_reserve> 0 && quote_reserve > 0, E_INSUFFICIENT_LIQUIDITY);
 
         let numerator: u128;
@@ -196,12 +196,12 @@ module sea::router {
         ((numerator / denominator + 1) as u64)
     }
 
-    public fun get_amount_out<B, Q, F>(
+    public fun get_amount_out<B, Q>(
         amount_in: u64,
         out_is_quote: bool,
     ): u64 {
         assert!(amount_in > 0, E_INVALID_AMOUNT_IN);
-        let (base_reserve, quote_reserve, fee_ratio) = amm::get_pool_reserve_fee<B, Q, F>();
+        let (base_reserve, quote_reserve, fee_ratio) = amm::get_pool_reserve_fee<B, Q>();
         assert!(base_reserve > 0 && quote_reserve > 0, E_INSUFFICIENT_LIQUIDITY);
 
         let fee_deno = fee::get_fee_denominate();

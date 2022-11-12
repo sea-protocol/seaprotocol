@@ -3,7 +3,7 @@ name = "Sea"
 version = "0.1.0" # Per SemVer
 
 [addresses]
-sea = "0x393a63f47da7a757a252cb44fbab2afe602efe9d88e8ae84aac7db4949a9beb0"
+sea = "0x20cea9406e2349568c613140a57988290deb709ae14fed30f29320f9b446abbf"
 
 # sea_spot = "0x5e8c5122bd2ce18e45912699613ab527697bf58556815c08ad5463092dd91990"
 sea_spot = "0xb30051d81a4f9e0303c7c3a31eb1b86d9e7518a5e9845147e2c4f07f12dae7a4"
@@ -19,6 +19,9 @@ local = "./sea_init/"
 
 [dependencies.SeaLP]
 local = "./sea_lp/"
+
+[dependencies.SeaLib]
+local = "./sea_lib/"
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"

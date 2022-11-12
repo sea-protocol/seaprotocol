@@ -16,20 +16,21 @@ module sea::sea {
 
     struct SEA {}
     
+    const E_NO_AUTH: u64 = 1;
+
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     friend sea::mining;
 
     /// Capabilities resource storing mint and burn capabilities.
     /// The resource is stored on the account that initialized coin `CoinType`.
     struct Capabilities<phantom CoinType> has key {
+        owner: address,
         burn_cap: BurnCapability<CoinType>,
         freeze_cap: FreezeCapability<CoinType>,
         mint_cap: MintCapability<CoinType>,
     }
 
-    // Public functions ====================================================
-    
-    public entry fun init_module(
+    fun init_module(
         sender: &signer,
     ) {
         assert!(address_of(sender) == @sea, 1);
@@ -42,11 +43,34 @@ module sea::sea {
             true,
         );
         move_to(sender, Capabilities<SEA> {
+            owner: address_of(sender),
             burn_cap,
             freeze_cap,
             mint_cap,
         });
     }
+
+    // Admin functions ====================================================
+    // public entry fun transfer_cap(
+    //     admin: &signer,
+    //     from_addr: address,
+    //     to_addr: address,
+    // ) acquires Capabilities {
+    //     let cap = borrow_global_mut<Capabilities<SEA>>(from_addr);
+    //     assert!(address_of(admin) == cap.owner, E_NO_AUTH);
+
+    //     cap.owner = to_addr;
+    // }
+
+    // public entry fun claim_cap(
+    //     admin: &signer,
+    //     from_addr: address,
+    // ) acquires Capabilities {
+    //     let cap = borrow_global_mut<Capabilities<SEA>>(from_addr);
+    //     assert!(address_of(admin) == cap.owner, E_NO_AUTH);
+
+    //     move_to(admin, cap);
+    // }
 
     public(friend) fun mint(
         to: address,

@@ -1,9 +1,9 @@
 [package]
-name = 'SeaInit'
+name = 'SeaLib'
 version = '0.1.0'
 
 [addresses]
-sea = "0x20cea9406e2349568c613140a57988290deb709ae14fed30f29320f9b446abbf"
+sealib = "0x7587a895cddb80d22b248603408f460acbdb901c733e01750ab88c71886fc7e6"
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"

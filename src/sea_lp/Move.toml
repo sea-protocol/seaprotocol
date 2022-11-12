@@ -2,6 +2,7 @@
 name = 'SeaLP'
 version = '0.1.0'
 
+# this is the resource account
 [addresses]
 sea_lp = "0xb30051d81a4f9e0303c7c3a31eb1b86d9e7518a5e9845147e2c4f07f12dae7a4"
 

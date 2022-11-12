@@ -2,37 +2,56 @@
 // fee denominator is 1000000
 module sea::fee {
     use std::signer::address_of;
-    use aptos_std::type_info;
+    // use aptos_std::type_info;
+    use aptos_std::table;
 
-    // fee ratio 0.02%
-    struct FeeRatio200 has store {}
+    // // fee ratio 0.02%
+    // struct FeeRatio200 has store {}
 
-    // fee ratio 0.05%
-    struct FeeRatio500 has store {}
+    // // fee ratio 0.05%
+    // struct FeeRatio500 has store {}
 
-    // fee ratio 0.1%
-    struct FeeRatio1000 has store {}
+    // // fee ratio 0.1%
+    // struct FeeRatio1000 has store {}
 
     struct MakerProportion has key {
         grid_proportion: u128,
         order_proportion: u128,
     }
 
+    struct FeeConfig has key {
+        fee_levels: table::Table<u64, bool>,
+    }
+
     const PROP_DENOMINATE: u128 = 1000;
     const FEE_DENOMINATE:  u64 = 1000000;
 
     /// Errors
-    const E_NO_FEE_RATIO:  u64 = 4000;
-    const E_NO_AUTH:       u64 = 4001;
-    const E_INVALID_SHARE: u64 = 4002;
+    const E_NO_FEE_RATIO:      u64 = 4000;
+    const E_NO_AUTH:           u64 = 4001;
+    const E_INVALID_SHARE:     u64 = 4002;
+    const E_INVALID_FEE_LEVEL: u64 = 4003;
 
     public entry fun initialize(sea_admin: &signer) {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
 
+        let fee: table::Table<u64, bool> = table::new();
+        table::add(&mut fee, 200, true);
+        table::add(&mut fee, 500, true);
+        table::add(&mut fee, 1000, true);
+
+        move_to(sea_admin, FeeConfig{
+            fee_levels: fee,
+        });
         move_to(sea_admin, MakerProportion{
-            grid_proportion: 900,
-            order_proportion: 400,
-            })
+            grid_proportion: 400,
+            order_proportion: 50,
+        })
+    }
+
+    public entry fun assert_fee_level_valid(fee_level: u64) acquires FeeConfig {
+        let fee_conf = borrow_global<FeeConfig>(@sea);
+        assert!(table::contains(&fee_conf.fee_levels, fee_level), E_INVALID_FEE_LEVEL);
     }
 
     public entry fun modify_maker_port(
@@ -62,18 +81,18 @@ module sea::fee {
     }
 
     /// get fee ratio by type
-    public fun get_fee_ratio<F>(): u64 {
-        if (type_info::type_of<F>() == type_info::type_of<FeeRatio200>()) {
-            return 200
-        } else if (type_info::type_of<F>() == type_info::type_of<FeeRatio500>()) {
-            return 500
-        } else if (type_info::type_of<F>() == type_info::type_of<FeeRatio1000>()) {
-            return 1000
-        };
+    // public fun get_fee_ratio<F>(): u64 {
+    //     if (type_info::type_of<F>() == type_info::type_of<FeeRatio200>()) {
+    //         return 200
+    //     } else if (type_info::type_of<F>() == type_info::type_of<FeeRatio500>()) {
+    //         return 500
+    //     } else if (type_info::type_of<F>() == type_info::type_of<FeeRatio1000>()) {
+    //         return 1000
+    //     };
     
-        assert!(false, E_NO_FEE_RATIO);
-        0
-    }
+    //     assert!(false, E_NO_FEE_RATIO);
+    //     0
+    // }
 
     // fee denominate
     public fun get_fee_denominate(): u64 {
@@ -86,15 +105,15 @@ module sea::fee {
     // #[test_only]
     // use std::debug;
 
-    #[test]
-    fun test_get_fee_ratio() {
-        let fee200 = get_fee_ratio<FeeRatio200>();
-        assert!(fee200 == 200, 200);
-        let fee500 = get_fee_ratio<FeeRatio500>();
-        assert!(fee500 == 500, 500);
-        let fee1000 = get_fee_ratio<FeeRatio1000>();
-        assert!(fee1000 == 1000, 1000);
-    }
+    // #[test]
+    // fun test_get_fee_ratio() {
+    //     let fee200 = get_fee_ratio<FeeRatio200>();
+    //     assert!(fee200 == 200, 200);
+    //     let fee500 = get_fee_ratio<FeeRatio500>();
+    //     assert!(fee500 == 500, 500);
+    //     let fee1000 = get_fee_ratio<FeeRatio1000>();
+    //     assert!(fee1000 == 1000, 1000);
+    // }
 
     #[test(sea_admin = @sea)]
     fun test_modify_fee_share(

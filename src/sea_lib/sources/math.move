@@ -1,4 +1,4 @@
-module sea::math {
+module sealib::math {
 
     const MAX_U128: u128 = 340282366920938463463374607431768211455;
 

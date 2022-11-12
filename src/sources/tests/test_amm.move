@@ -6,7 +6,7 @@ module sea::test_amm {
     use aptos_framework::coin;
 
     use sea::router;
-    use sea::fee::FeeRatio500;
+    // use sea::fee::FeeRatio500;
     use sea::test_env::{Self, T_BTC, T_USDC};
     use sea_lp::lp::{LP};
 
@@ -14,13 +14,13 @@ module sea::test_amm {
     const T_USDC_PRECISION: u64 = 1000000;
 
     #[test_only]
-    fun add_amm_liquidity<B, Q, F>(
+    fun add_amm_liquidity<B, Q>(
         user: &signer,
         base_amt: u64,
         quote_amt: u64,
         slip: u64, // n/10000
     ): u64 {
-        router::add_liquidity<B, Q, F>(
+        router::add_liquidity<B, Q>(
             user,
             base_amt,
             quote_amt,
@@ -28,7 +28,7 @@ module sea::test_amm {
             quote_amt * (10000-slip) / 10000,
         );
         let account_addr = signer::address_of(user);
-        let lp_balance = coin::balance<LP<B, Q, F>>(account_addr);
+        let lp_balance = coin::balance<LP<B, Q>>(account_addr);
         // let base_balance = coin::balance<B>(account_addr);
         // let quote_balance = coin::balance<Q>(account_addr);
 
@@ -41,13 +41,13 @@ module sea::test_amm {
     }
 
     #[test_only]
-    fun remove_amm_liquidity<B, Q, F>(
+    fun remove_amm_liquidity<B, Q>(
         user: &signer,
         amt: u64,
     ) {
-        router::remove_liquidity<B, Q, F>(user, amt, 0, 0);
+        router::remove_liquidity<B, Q>(user, amt, 0, 0);
         // let account_addr = signer::address_of(user);
-        // let lp_balance = coin::balance<LP<B, Q, F>>(account_addr);
+        // let lp_balance = coin::balance<LP<B, Q>>(account_addr);
         // let base_balance = coin::balance<B>(account_addr);
         // let quote_balance = coin::balance<Q>(account_addr);
 
@@ -74,7 +74,7 @@ module sea::test_amm {
     ) {
         test_env::create_test_env(sea_admin, user1, user2, user3, user4);
 
-        add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        add_amm_liquidity<T_BTC, T_USDC>(
             user1,
             999,
             999,
@@ -98,7 +98,7 @@ module sea::test_amm {
     ) {
         test_env::create_test_env(sea_admin, user1, user2, user3, user4);
 
-        let lp = add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        let lp = add_amm_liquidity<T_BTC, T_USDC>(
             user1,
             1001,
             1001,
@@ -123,25 +123,25 @@ module sea::test_amm {
     ) {
         test_env::create_test_env(sea_admin, user1, user2, user3, user4);
 
-        add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        add_amm_liquidity<T_BTC, T_USDC>(
             user1,
             1*T_BTC_PRECISION,
             10000*T_USDC_PRECISION,
             10,
         );
-        add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        add_amm_liquidity<T_BTC, T_USDC>(
             user2,
             2*T_BTC_PRECISION,
             20000*T_USDC_PRECISION,
             10,
         );
-        add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        add_amm_liquidity<T_BTC, T_USDC>(
             user3,
             3*T_BTC_PRECISION,
             30000*T_USDC_PRECISION,
             10,
         );
-        add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        add_amm_liquidity<T_BTC, T_USDC>(
             user4,
             T_BTC_PRECISION/10,
             1000*T_USDC_PRECISION,
@@ -165,51 +165,51 @@ module sea::test_amm {
     ) {
         test_env::create_test_env(sea_admin, user1, user2, user3, user4);
 
-        let liq1 = add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        let liq1 = add_amm_liquidity<T_BTC, T_USDC>(
             user1,
             1*T_BTC_PRECISION,
             10000*T_USDC_PRECISION,
             10,
         );
-        remove_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(user1, liq1);
+        remove_amm_liquidity<T_BTC, T_USDC>(user1, liq1);
 
-        let liq2 = add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        let liq2 = add_amm_liquidity<T_BTC, T_USDC>(
             user2,
             2*T_BTC_PRECISION,
             20000*T_USDC_PRECISION,
             10,
         );
-        remove_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(user2, liq2);
+        remove_amm_liquidity<T_BTC, T_USDC>(user2, liq2);
 
-        let liq3 = add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        let liq3 = add_amm_liquidity<T_BTC, T_USDC>(
             user3,
             3*T_BTC_PRECISION,
             30000*T_USDC_PRECISION,
             10,
         );
-        remove_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(user3, liq3);
+        remove_amm_liquidity<T_BTC, T_USDC>(user3, liq3);
 
-        let liq4 = add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        let liq4 = add_amm_liquidity<T_BTC, T_USDC>(
             user4,
             T_BTC_PRECISION/10,
             1000*T_USDC_PRECISION,
             10,
         );
-        remove_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(user4, liq4);
+        remove_amm_liquidity<T_BTC, T_USDC>(user4, liq4);
     }
 
     // quote_out linear quote out
     #[test_only]
-    fun test_sell_exact_base<B, Q, F>(
+    fun test_sell_exact_base<B, Q>(
         user: &signer,
         base_in: u64,
         quote_out: u64
     ) {
-        let amt_out = router::get_amount_out<B, Q, F>(base_in, true);
+        let amt_out = router::get_amount_out<B, Q>(base_in, true);
         debug::print(&amt_out);
         debug::print(&quote_out);
         debug::print(&100000000000000001);
-        router::sell_exact_base<T_BTC, T_USDC, FeeRatio500>(
+        router::sell_exact_base<T_BTC, T_USDC>(
             user,
             base_in,
             amt_out
@@ -232,14 +232,14 @@ module sea::test_amm {
     ) {
         test_env::create_test_env(sea_admin, user1, user2, user3, user4);
 
-        add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        add_amm_liquidity<T_BTC, T_USDC>(
             user1,
             1*T_BTC_PRECISION,
             10000*T_USDC_PRECISION,
             10,
         );
 
-        test_sell_exact_base<T_BTC, T_USDC, FeeRatio500>(
+        test_sell_exact_base<T_BTC, T_USDC>(
             user2,
             1*T_BTC_PRECISION/100,
             100*T_USDC_PRECISION
@@ -247,16 +247,16 @@ module sea::test_amm {
     }
 
     #[test_only]
-    fun test_sell_exact_quote<B, Q, F>(
+    fun test_sell_exact_quote<B, Q>(
         user: &signer,
         quote_in: u64,
         base_out: u64
     ) {
-        let amt_out = router::get_amount_out<B, Q, F>(quote_in, false);
+        let amt_out = router::get_amount_out<B, Q>(quote_in, false);
         debug::print(&amt_out);
         debug::print(&base_out);
         debug::print(&100000000000000002);
-        router::sell_exact_quote<T_BTC, T_USDC, FeeRatio500>(
+        router::sell_exact_quote<T_BTC, T_USDC>(
             user,
             quote_in,
             amt_out
@@ -279,14 +279,14 @@ module sea::test_amm {
     ) {
         test_env::create_test_env(sea_admin, user1, user2, user3, user4);
 
-        add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        add_amm_liquidity<T_BTC, T_USDC>(
             user1,
             1*T_BTC_PRECISION,
             10000*T_USDC_PRECISION,
             10,
         );
 
-        test_sell_exact_quote<T_BTC, T_USDC, FeeRatio500>(
+        test_sell_exact_quote<T_BTC, T_USDC>(
             user2,
             100*T_USDC_PRECISION,
             1*T_BTC_PRECISION/100,
@@ -294,16 +294,16 @@ module sea::test_amm {
     }
 
     #[test_only]
-    fun test_buy_exact_quote<B, Q, F>(
+    fun test_buy_exact_quote<B, Q>(
         user: &signer,
         quote_out: u64,
         base_in: u64
     ) {
-        let amt_in = router::get_amount_in<B, Q, F>(quote_out, false);
+        let amt_in = router::get_amount_in<B, Q>(quote_out, false);
         debug::print(&amt_in);
         debug::print(&base_in);
         debug::print(&100000000000000003);
-        router::buy_exact_quote<T_BTC, T_USDC, FeeRatio500>(
+        router::buy_exact_quote<T_BTC, T_USDC>(
             user,
             quote_out,
             amt_in
@@ -326,14 +326,14 @@ module sea::test_amm {
     ) {
         test_env::create_test_env(sea_admin, user1, user2, user3, user4);
 
-        add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        add_amm_liquidity<T_BTC, T_USDC>(
             user1,
             1*T_BTC_PRECISION,
             10000*T_USDC_PRECISION,
             10,
         );
 
-        test_buy_exact_quote<T_BTC, T_USDC, FeeRatio500>(
+        test_buy_exact_quote<T_BTC, T_USDC>(
             user2,
             100*T_USDC_PRECISION,
             1*T_BTC_PRECISION/100,
@@ -341,16 +341,16 @@ module sea::test_amm {
     }
 
     #[test_only]
-    fun test_buy_exact_base<B, Q, F>(
+    fun test_buy_exact_base<B, Q>(
         user: &signer,
         quote_out: u64,
         base_in: u64
     ) {
-        let amt_in = router::get_amount_in<B, Q, F>(quote_out, true);
+        let amt_in = router::get_amount_in<B, Q>(quote_out, true);
         debug::print(&amt_in);
         debug::print(&base_in);
         debug::print(&100000000000000003);
-        router::buy_exact_base<T_BTC, T_USDC, FeeRatio500>(
+        router::buy_exact_base<T_BTC, T_USDC>(
             user,
             quote_out,
             amt_in
@@ -373,14 +373,14 @@ module sea::test_amm {
     ) {
         test_env::create_test_env(sea_admin, user1, user2, user3, user4);
 
-        add_amm_liquidity<T_BTC, T_USDC, FeeRatio500>(
+        add_amm_liquidity<T_BTC, T_USDC>(
             user1,
             1*T_BTC_PRECISION,
             10000*T_USDC_PRECISION,
             10,
         );
 
-        test_buy_exact_base<T_BTC, T_USDC, FeeRatio500>(
+        test_buy_exact_base<T_BTC, T_USDC>(
             user2,
             1*T_BTC_PRECISION/100,
             100*T_USDC_PRECISION,

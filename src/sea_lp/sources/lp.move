@@ -11,5 +11,5 @@
 /// 
 module sea_lp::lp {
     // LP token
-    struct LP<phantom BaseType, phantom QuoteType, phantom FeeRatio> {}
+    struct LP<phantom BaseType, phantom QuoteType> {}
 }
