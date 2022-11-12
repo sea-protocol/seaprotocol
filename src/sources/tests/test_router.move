@@ -1,5 +1,5 @@
 #[test_only]
-module sea::test_amm {
+module sea::test_router {
     use std::signer;
     use std::debug;
 
@@ -58,7 +58,6 @@ module sea::test_amm {
     }
 
     #[test(
-        sea_admin = @sea,
         user1 = @user_1,
         user2 = @user_2,
         user3 = @user_3,
@@ -66,13 +65,12 @@ module sea::test_amm {
     )]
     #[expected_failure(abort_code = 5003)]
     public fun test_less_min_liquidity(
-        sea_admin: &signer,
         user1: &signer,
         user2: &signer,
         user3: &signer,
         user4: &signer,
     ) {
-        test_env::create_test_env(sea_admin, user1, user2, user3, user4);
+        test_env::create_test_env(user1, user2, user3, user4);
 
         add_amm_liquidity<T_BTC, T_USDC>(
             user1,
@@ -83,20 +81,18 @@ module sea::test_amm {
     }
 
     #[test(
-        sea_admin = @sea,
         user1 = @user_1,
         user2 = @user_2,
         user3 = @user_3,
         user4 = @user_4
     )]
     public fun test_add_min_liquidity(
-        sea_admin: &signer,
         user1: &signer,
         user2: &signer,
         user3: &signer,
         user4: &signer,
     ) {
-        test_env::create_test_env(sea_admin, user1, user2, user3, user4);
+        test_env::create_test_env(user1, user2, user3, user4);
 
         let lp = add_amm_liquidity<T_BTC, T_USDC>(
             user1,
@@ -108,20 +104,18 @@ module sea::test_amm {
     }
 
     #[test(
-        sea_admin = @sea,
         user1 = @user_1,
         user2 = @user_2,
         user3 = @user_3,
         user4 = @user_4
     )]
     public fun test_add_liquidity(
-        sea_admin: &signer,
         user1: &signer,
         user2: &signer,
         user3: &signer,
         user4: &signer,
     ) {
-        test_env::create_test_env(sea_admin, user1, user2, user3, user4);
+        test_env::create_test_env(user1, user2, user3, user4);
 
         add_amm_liquidity<T_BTC, T_USDC>(
             user1,
@@ -150,20 +144,18 @@ module sea::test_amm {
     }
 
     #[test(
-        sea_admin = @sea,
         user1 = @user_1,
         user2 = @user_2,
         user3 = @user_3,
         user4 = @user_4
     )]
     public fun test_add_remove_liquidity(
-        sea_admin: &signer,
         user1: &signer,
         user2: &signer,
         user3: &signer,
         user4: &signer,
     ) {
-        test_env::create_test_env(sea_admin, user1, user2, user3, user4);
+        test_env::create_test_env(user1, user2, user3, user4);
 
         let liq1 = add_amm_liquidity<T_BTC, T_USDC>(
             user1,
@@ -217,20 +209,18 @@ module sea::test_amm {
     }
 
     #[test(
-        sea_admin = @sea,
         user1 = @user_1,
         user2 = @user_2,
         user3 = @user_3,
         user4 = @user_4
     )]
     public fun test_amm_sell_exact_base_e2e(
-        sea_admin: &signer,
         user1: &signer,
         user2: &signer,
         user3: &signer,
         user4: &signer,
     ) {
-        test_env::create_test_env(sea_admin, user1, user2, user3, user4);
+        test_env::create_test_env(user1, user2, user3, user4);
 
         add_amm_liquidity<T_BTC, T_USDC>(
             user1,
@@ -264,20 +254,18 @@ module sea::test_amm {
     }
 
     #[test(
-        sea_admin = @sea,
         user1 = @user_1,
         user2 = @user_2,
         user3 = @user_3,
         user4 = @user_4
     )]
     public fun test_amm_swap_exact_quote_e2e(
-        sea_admin: &signer,
         user1: &signer,
         user2: &signer,
         user3: &signer,
         user4: &signer,
     ) {
-        test_env::create_test_env(sea_admin, user1, user2, user3, user4);
+        test_env::create_test_env(user1, user2, user3, user4);
 
         add_amm_liquidity<T_BTC, T_USDC>(
             user1,
@@ -311,20 +299,18 @@ module sea::test_amm {
     }
 
     #[test(
-        sea_admin = @sea,
         user1 = @user_1,
         user2 = @user_2,
         user3 = @user_3,
         user4 = @user_4
     )]
     public fun test_amm_buy_exact_quote_e2e(
-        sea_admin: &signer,
         user1: &signer,
         user2: &signer,
         user3: &signer,
         user4: &signer,
     ) {
-        test_env::create_test_env(sea_admin, user1, user2, user3, user4);
+        test_env::create_test_env(user1, user2, user3, user4);
 
         add_amm_liquidity<T_BTC, T_USDC>(
             user1,
@@ -358,20 +344,18 @@ module sea::test_amm {
     }
 
     #[test(
-        sea_admin = @sea,
         user1 = @user_1,
         user2 = @user_2,
         user3 = @user_3,
         user4 = @user_4
     )]
     public fun test_amm_buy_exact_base_e2e(
-        sea_admin: &signer,
         user1: &signer,
         user2: &signer,
         user3: &signer,
         user4: &signer,
     ) {
-        test_env::create_test_env(sea_admin, user1, user2, user3, user4);
+        test_env::create_test_env(user1, user2, user3, user4);
 
         add_amm_liquidity<T_BTC, T_USDC>(
             user1,

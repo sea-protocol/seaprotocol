@@ -13,6 +13,7 @@ module sea::test_env {
     use sea::fee;
     use sea::amm;
     use sea::escrow;
+    use sea::events;
     use sea::spot_account;
 
     /// coins
@@ -85,58 +86,58 @@ module sea::test_env {
         market::register_pair<B, Q>(sea_admin, fee_level, price_coefficient, lot_size);
     }
     
-    fun prepare_env(
-        sea_admin: &signer
-    ) {
+    fun prepare_env(): signer {
         // account::create_account_for_test(@sea);
         genesis::setup();
         account::create_account_for_test(@sea_spot);
+        let sea_admin = account::create_account_for_test(@sea);
 
-        spot_account::initialize_spot_account(sea_admin);
-        market::initialize(sea_admin);
-        escrow::initialize(sea_admin);
-        fee::initialize(sea_admin);
-        amm::initialize(sea_admin);
+        spot_account::initialize_spot_account(&sea_admin);
+        events::initialize(&sea_admin);
+        market::initialize(&sea_admin);
+        escrow::initialize(&sea_admin);
+        fee::initialize(&sea_admin);
+        amm::initialize(&sea_admin);
+
+        sea_admin
     }
 
     public fun create_test_env(
-        sea_admin: &signer,
         user_a: &signer,
         user_b: &signer,
         user_c: &signer,
         user_d: &signer,
     ) {
-        prepare_env(sea_admin);
+        let sea_admin = prepare_env();
 
-        aptos_account::create_account(address_of(sea_admin));
         aptos_account::create_account(address_of(user_a));
         aptos_account::create_account(address_of(user_b));
         aptos_account::create_account(address_of(user_c));
         aptos_account::create_account(address_of(user_d));
 
-        create_test_coin<T_BTC>(sea_admin, b"T_BTC", T_BTC_DECIMALS, user_a, user_b, user_c, user_d, T_BTC_AMT, T_BTC_AMT, T_BTC_AMT, T_BTC_AMT);
-        create_test_coin<T_ETH>(sea_admin, b"T_ETH", T_ETH_DECIMALS, user_a, user_b, user_c, user_d, T_ETH_AMT, T_ETH_AMT, T_ETH_AMT, T_ETH_AMT);
-        create_test_coin<T_USDC>(sea_admin, b"T_USDC", T_USDC_DECIMALS, user_a, user_b, user_c, user_d, T_USDC_AMT, T_USDC_AMT, T_USDC_AMT, T_USDC_AMT);
-        create_test_coin<T_USDT>(sea_admin, b"T_USDT", T_USDT_DECIMALS, user_a, user_b, user_c, user_d, T_USDT_AMT, T_USDT_AMT, T_USDT_AMT, T_USDT_AMT);
-        create_test_coin<T_SEA>(sea_admin, b"T_SEA", T_SEA_DECIMALS, user_a, user_b, user_c, user_d, T_SEA_AMT, T_SEA_AMT, T_SEA_AMT, T_SEA_AMT);
+        create_test_coin<T_BTC>(&sea_admin, b"T_BTC", T_BTC_DECIMALS, user_a, user_b, user_c, user_d, T_BTC_AMT, T_BTC_AMT, T_BTC_AMT, T_BTC_AMT);
+        create_test_coin<T_ETH>(&sea_admin, b"T_ETH", T_ETH_DECIMALS, user_a, user_b, user_c, user_d, T_ETH_AMT, T_ETH_AMT, T_ETH_AMT, T_ETH_AMT);
+        create_test_coin<T_USDC>(&sea_admin, b"T_USDC", T_USDC_DECIMALS, user_a, user_b, user_c, user_d, T_USDC_AMT, T_USDC_AMT, T_USDC_AMT, T_USDC_AMT);
+        create_test_coin<T_USDT>(&sea_admin, b"T_USDT", T_USDT_DECIMALS, user_a, user_b, user_c, user_d, T_USDT_AMT, T_USDT_AMT, T_USDT_AMT, T_USDT_AMT);
+        create_test_coin<T_SEA>(&sea_admin, b"T_SEA", T_SEA_DECIMALS, user_a, user_b, user_c, user_d, T_SEA_AMT, T_SEA_AMT, T_SEA_AMT, T_SEA_AMT);
 
         // min_notional: 1 USDC
-        create_quote<T_USDC>(sea_admin, 1000000);
+        create_quote<T_USDC>(&sea_admin, 1000000);
         // min: 1 USDT
-        create_quote<T_USDT>(sea_admin, 10000);
+        create_quote<T_USDT>(&sea_admin, 10000);
         // min: 0.0001
-        create_quote<T_BTC>(sea_admin, 10000);
+        create_quote<T_BTC>(&sea_admin, 10000);
 
         // create pair: BTC/USDC
-        create_test_pairs<T_BTC, T_USDC>(sea_admin, 500, 1000000, 10000);  // lot_size sea: 0.00001
-        create_test_pairs<T_BTC, T_USDT>(sea_admin, 500, 1000000, 10000); 
-        create_test_pairs<T_ETH, T_USDC>(sea_admin, 500, 1000000, 100000); // lot_size eth: 0.001
-        create_test_pairs<T_ETH, T_USDT>(sea_admin, 500, 1000000, 100000);
-        create_test_pairs<T_ETH, T_BTC>(sea_admin, 500, 100000000, 1000);
-        create_test_pairs<T_SEA, T_USDC>(sea_admin, 500, 100000000, 1000);  // lot_size sea: 0.001
-        create_test_pairs<T_SEA, T_USDT>(sea_admin, 500, 100000000, 1000);
-        create_test_pairs<T_SEA, T_BTC>(sea_admin, 500, 100000000, 1000);
+        create_test_pairs<T_BTC, T_USDC>(&sea_admin, 500, 1000000, 10000);  // lot_size sea: 0.00001
+        create_test_pairs<T_BTC, T_USDT>(&sea_admin, 500, 1000000, 10000); 
+        create_test_pairs<T_ETH, T_USDC>(&sea_admin, 500, 1000000, 100000); // lot_size eth: 0.001
+        create_test_pairs<T_ETH, T_USDT>(&sea_admin, 500, 1000000, 100000);
+        create_test_pairs<T_ETH, T_BTC>(&sea_admin, 500, 100000000, 1000);
+        create_test_pairs<T_SEA, T_USDC>(&sea_admin, 500, 100000000, 1000);  // lot_size sea: 0.001
+        create_test_pairs<T_SEA, T_USDT>(&sea_admin, 500, 100000000, 1000);
+        create_test_pairs<T_SEA, T_BTC>(&sea_admin, 500, 100000000, 1000);
 
-        create_test_pairs<T_USDT, T_USDC>(sea_admin, 500, 1000000, 100); // lot_size: 0.01
+        create_test_pairs<T_USDT, T_USDC>(&sea_admin, 500, 1000000, 100); // lot_size: 0.01
     }
 }

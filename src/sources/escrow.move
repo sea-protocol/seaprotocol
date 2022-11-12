@@ -11,11 +11,13 @@
 /// 
 module sea::escrow {
     use std::signer::address_of;
-    use aptos_framework::coin::{Self, Coin};
+    use aptos_framework::coin;
     use aptos_framework::account::{Self, SignerCapability};
     use aptos_std::type_info::{Self, TypeInfo};
     use aptos_std::table::{Self, Table};
+    
     use sea::spot_account;
+    use sea::events;
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     friend sea::market;
@@ -41,11 +43,11 @@ module sea::escrow {
     }
 
     // store in account
-    struct AccountEscrow<phantom CoinType> has key {
-        // key is coin_id
-        // frozen: Coin<CoinType>,
-        available: Coin<CoinType>,
-    }
+    // struct AccountEscrow<phantom CoinType> has key {
+    //     // key is coin_id
+    //     // frozen: Coin<CoinType>,
+    //     available: Coin<CoinType>,
+    // }
 
     /// Stores resource account signer capability under Liquidswap account.
     struct SpotEscrowAccountCapability has key {
@@ -70,6 +72,7 @@ module sea::escrow {
         move_to(sea_admin, SpotEscrowAccountCapability { signer_cap });
     }
 
+    /*
     // get account escrow coin available
     public fun escrow_available<CoinType>(
         addr: address
@@ -80,17 +83,6 @@ module sea::escrow {
         let ref = borrow_global<AccountEscrow<CoinType>>(addr);
         coin::value(&ref.available)
     }
-
-    // get account escrow coin available
-    // public fun escrow_frozen<CoinType>(
-    //     addr: address
-    // ): u64 acquires AccountEscrow {
-    //     if (!exists<AccountEscrow<CoinType>>(addr)) {
-    //         return 0
-    //     };
-    //     let ref = borrow_global<AccountEscrow<CoinType>>(addr);
-    //     coin::value(&ref.frozen)
-    // }
 
     public fun check_init_account_escrow<CoinType>(
         account: &signer
@@ -162,6 +154,7 @@ module sea::escrow {
         //     coin::transfer<CoinType>(&escrower, account_addr, amount);
         // };
     }
+    */
 
     public fun is_quote_coin<CoinType>(): bool acquires EscrowAccountAsset {
         let info = type_info::type_of<CoinType>();
@@ -200,6 +193,7 @@ module sea::escrow {
             ref.n_account = account_id;
             table::add(&mut ref.address_map, addr, account_id);
             table::add(&mut ref.account_map, account_id, addr);
+            events::emit_account_event(account_id, addr);
 
             account_id
         } else {
@@ -217,6 +211,8 @@ module sea::escrow {
         ref.n_account = account_id;
         table::add(&mut ref.address_map, addr, account_id);
         table::add(&mut ref.account_map, account_id, addr);
+
+        events::emit_account_event(account_id, addr);
 
         account_id
     }
@@ -247,31 +243,31 @@ module sea::escrow {
     // }
 
     // increase the escrow account coin
-    public(friend) fun incr_escrow_coin<CoinType>(
-        addr: address,
-        amt: Coin<CoinType>,
-        // is_frozen: bool
-    ) acquires AccountEscrow {
-        let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
-        // if (is_frozen) {
-        //     coin::merge(&mut escrow_ref.frozen, amt);
-        // } else {
-            coin::merge(&mut escrow_ref.available, amt);
-        // }
-    }
+    // public(friend) fun incr_escrow_coin<CoinType>(
+    //     addr: address,
+    //     amt: Coin<CoinType>,
+    //     // is_frozen: bool
+    // ) acquires AccountEscrow {
+    //     let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
+    //     // if (is_frozen) {
+    //     //     coin::merge(&mut escrow_ref.frozen, amt);
+    //     // } else {
+    //         coin::merge(&mut escrow_ref.available, amt);
+    //     // }
+    // }
 
-    public(friend) fun dec_escrow_coin<CoinType>(
-        addr: address,
-        amt: u64,
-        // is_frozen: bool
-    ): Coin<CoinType> acquires AccountEscrow {
-        let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
-        // if (is_frozen) {
-        //     coin::extract<CoinType>(&mut escrow_ref.frozen, amt)
-        // } else {
-            coin::extract<CoinType>(&mut escrow_ref.available, amt)
-        // }
-    }
+    // public(friend) fun dec_escrow_coin<CoinType>(
+    //     addr: address,
+    //     amt: u64,
+    //     // is_frozen: bool
+    // ): Coin<CoinType> acquires AccountEscrow {
+    //     let escrow_ref = borrow_global_mut<AccountEscrow<CoinType>>(addr);
+    //     // if (is_frozen) {
+    //     //     coin::extract<CoinType>(&mut escrow_ref.frozen, amt)
+    //     // } else {
+    //         coin::extract<CoinType>(&mut escrow_ref.available, amt)
+    //     // }
+    // }
 
     public(friend) fun get_or_register_coin_id<CoinType>(
         is_quote: bool,
@@ -293,6 +289,8 @@ module sea::escrow {
             table::add<TypeInfo, u64>(&mut coinlist.quote_map, info, id);
         };
         table::add<TypeInfo, u64>(&mut coinlist.coin_map, info, id);
+        events::emit_coin_event<CoinType>(id);
+
         id
     }
 
