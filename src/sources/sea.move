@@ -27,9 +27,7 @@ module sea::sea {
         mint_cap: MintCapability<CoinType>,
     }
 
-    // Public functions ====================================================
-    
-    public entry fun init_module(
+    fun init_module(
         sender: &signer,
     ) {
         assert!(address_of(sender) == @sea, 1);
@@ -48,6 +46,8 @@ module sea::sea {
         });
     }
 
+    // Public functions ====================================================
+    
     public(friend) fun mint(
         to: address,
         amount: u64,

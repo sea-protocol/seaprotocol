@@ -37,7 +37,7 @@ module sea::mining {
     const E_NOT_ENOUGH_SEA:     u64 = 901;
 
     // Public functions ====================================================
-    public entry fun init_module(
+    fun init_module(
         sender: &signer,
     ) {
         assert!(address_of(sender) == @sea, 1);
