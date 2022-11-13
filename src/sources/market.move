@@ -7,7 +7,7 @@
 ///
 /// # Background
 ///
-/// spot pairs
+/// spot market
 /// 
 module sea::market {
     use std::signer::address_of;
@@ -247,7 +247,8 @@ module sea::market {
     const E_MIN_NOTIONAL:        u64 = 21;
     const E_PAIR_PRIORITY:       u64 = 22;
     const E_INVALID_PARAM:       u64 = 23;
-    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 24;
+    const E_FOK_NOT_COMPLETE:    u64 = 24;
+    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 25;
 
     // Admin functions ====================================================
     public entry fun initialize(sea_admin: &signer) {
@@ -497,11 +498,10 @@ module sea::market {
         qty: u64,
         ioc: bool,
         fok: bool,
-        // from_escrow: bool,
-        // to_escrow: bool,
     ): u128 acquires Pair, AccountGrids {
         if (fok) {
             // TODO check this order can be filled
+            assert!(fok_fill_complete<B, Q>(side, price, qty), E_FOK_NOT_COMPLETE);
         };
         let taker_addr = address_of(account);
         let opts = &PlaceOrderOpts {
@@ -1045,6 +1045,34 @@ module sea::market {
         let id = pair.pair_id << 40 | (pair.n_order & ORDER_ID_MASK);
         pair.n_order = pair.n_order + 1;
         id
+    }
+
+    fun fok_fill_complete<B, Q>(
+        taker_side: u8,
+        price: u64,
+        qty: u64,
+    ): bool acquires Pair {
+        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+        let orderbook = if (taker_side == BUY) &mut pair.asks else &mut pair.bids;
+        let completed = false;
+
+        while (!rbtree::is_empty(orderbook)) {
+            let (_, key, order) = rbtree::borrow_leftmost_keyval_mut(orderbook);
+            let (maker_price, _) = price::get_price_order_id(key);
+            if (((taker_side == BUY && price < maker_price) ||
+                    (taker_side == SELL && price >  maker_price))
+             ) {
+                break
+            };
+            if (order.qty >= qty) {
+                completed = true;
+                break
+            } else {
+                qty = qty - order.qty;
+            }
+        };
+
+        completed
     }
 
     fun match_internal<B, Q>(
