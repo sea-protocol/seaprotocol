@@ -14,6 +14,9 @@ module sea::events {
     use aptos_framework::account;
     use aptos_framework::coin;
 
+    friend sea::escrow;
+    friend sea::market;
+    
     const E_NO_AUTH:     u64 = 10;
     const E_INITIALIZED: u64 = 11;
 
@@ -68,7 +71,7 @@ module sea::events {
         });
     }
 
-    public fun emit_pair_event<B, Q>(
+    public(friend) fun emit_pair_event<B, Q>(
         fee_ratio: u64,
         base_id: u64,
         quote_id: u64,
@@ -97,7 +100,7 @@ module sea::events {
         );
     }
 
-    public fun emit_quote_event<Q>(
+    public(friend) fun emit_quote_event<Q>(
         coin_id: u64,
         min_notional: u64,
     ) acquires EventContainer {
@@ -113,7 +116,7 @@ module sea::events {
         );
     }
 
-    public fun emit_coin_event<Q>(
+    public(friend) fun emit_coin_event<Q>(
         coin_id: u64,
     ) acquires EventContainer {
         let container = borrow_global_mut<EventContainer>(@sea);
@@ -127,7 +130,7 @@ module sea::events {
         );
     }
 
-    public fun emit_account_event(
+    public(friend) fun emit_account_event(
         account_id: u64,
         account_addr: address,
     ) acquires EventContainer {

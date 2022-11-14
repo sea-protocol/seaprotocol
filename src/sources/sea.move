@@ -12,7 +12,9 @@
 module sea::sea {
     use std::string;
     use std::signer::address_of;
-    use aptos_framework::coin::{Self, BurnCapability, FreezeCapability, MintCapability};
+    use aptos_framework::coin::{Self, BurnCapability, MintCapability};
+
+    use sea::utils;
 
     struct SEA {}
     
@@ -24,9 +26,9 @@ module sea::sea {
     /// Capabilities resource storing mint and burn capabilities.
     /// The resource is stored on the account that initialized coin `CoinType`.
     struct Capabilities<phantom CoinType> has key {
-        owner: address,
+        // owner: address,
         burn_cap: BurnCapability<CoinType>,
-        freeze_cap: FreezeCapability<CoinType>,
+        // freeze_cap: FreezeCapability<CoinType>,
         mint_cap: MintCapability<CoinType>,
     }
 
@@ -42,10 +44,10 @@ module sea::sea {
             4,
             true,
         );
+        coin::destroy_freeze_cap(freeze_cap);
         move_to(sender, Capabilities<SEA> {
-            owner: address_of(sender),
+            // owner: address_of(sender),
             burn_cap,
-            freeze_cap,
             mint_cap,
         });
     }
@@ -73,13 +75,15 @@ module sea::sea {
     // }
 
     public(friend) fun mint(
-        to: address,
+        account: &signer,
         amount: u64,
     ) acquires Capabilities {
         let capabilities = borrow_global<Capabilities<SEA>>(@sea);
+        let addr = address_of(account);
 
         let coins_minted = coin::mint(amount, &capabilities.mint_cap);
-        coin::deposit(to, coins_minted);
+
+        utils::register_coin_if_not_exist<SEA>(account);
+        coin::deposit(addr, coins_minted);
     }
 }
-

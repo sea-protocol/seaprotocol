@@ -75,7 +75,7 @@ module sea::mining {
         update_pool_info(pool_info);
         let reward = (((maker_info.volume as u128) * (pool_info.pool_sea as u128) / (pool_info.total_volume as u128)) as u64);
         assert!(reward <= pool_info.pool_sea, E_NOT_ENOUGH_SEA);
-        sea::mint(addr, reward);
+        sea::mint(account, reward);
 
         pool_info.total_volume = pool_info.total_volume - maker_info.volume;
         pool_info.pool_sea = pool_info.pool_sea - reward;

@@ -52,9 +52,7 @@ module sea::router {
         let lp_coins = amm::mint<B, Q>(coin_base, coin_quote);
 
         let acc_addr = address_of(account);
-        if (!coin::is_account_registered<LP<B, Q>>(acc_addr)) {
-            coin::register<LP<B, Q>>(account);
-        };
+        utils::register_coin_if_not_exist<LP<B, Q>>(account);
         coin::deposit(acc_addr, lp_coins);
     }
 

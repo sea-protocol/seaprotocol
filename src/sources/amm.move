@@ -16,8 +16,9 @@ module sea::amm {
     use std::string::{Self, String};
     use aptos_framework::coin::{Self, Coin};
     use aptos_framework::timestamp;
-    use u256::u256;
-    use uq64x64::uq64x64;
+
+    use sealib::u256;
+    use sealib::uq64x64;
 
     use sealib::math;
     
@@ -431,8 +432,7 @@ module sea::amm {
     }
 
     fun get_lp_name_symbol<BaseType, QuoteType>(): (String, String) {
-        let name = string::utf8(b"");
-        string::append_utf8(&mut name, b"LP-");
+        let name = string::utf8(b"LP-");
         string::append(&mut name, coin::symbol<BaseType>());
         string::append_utf8(&mut name, b"-");
         string::append(&mut name, coin::symbol<QuoteType>());
