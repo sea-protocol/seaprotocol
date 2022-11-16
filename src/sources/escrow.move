@@ -54,7 +54,11 @@ module sea::escrow {
         signer_cap: SignerCapability
     }
 
-    public entry fun initialize(sea_admin: &signer) {
+   fun init_module(sea_admin: &signer) {
+        initialize(sea_admin);
+   }
+
+   public fun initialize(sea_admin: &signer) {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
         move_to(sea_admin, EscrowAccountAsset {
             n_coin: 0,
@@ -70,6 +74,20 @@ module sea::escrow {
         // the resource account signer
         let signer_cap = spot_account::retrieve_signer_cap(sea_admin);
         move_to(sea_admin, SpotEscrowAccountCapability { signer_cap });
+    }
+
+    public entry fun register_account(account: &signer): u64 acquires EscrowAccountAsset {
+        let addr = address_of(account);
+        let ref = borrow_global_mut<EscrowAccountAsset>(@sea);
+        assert!(!table::contains<address, u64>(&ref.address_map, addr), E_ACCOUNT_REGISTERED);
+        let account_id: u64 = ref.n_account + 1;
+        ref.n_account = account_id;
+        table::add(&mut ref.address_map, addr, account_id);
+        table::add(&mut ref.account_map, account_id, addr);
+
+        events::emit_account_event(account_id, addr);
+
+        account_id
     }
 
     /*
@@ -202,19 +220,6 @@ module sea::escrow {
                 addr
             )
         }
-    }
-
-    public(friend) fun register_account(addr: address): u64 acquires EscrowAccountAsset {
-        let ref = borrow_global_mut<EscrowAccountAsset>(@sea);
-        assert!(!table::contains<address, u64>(&ref.address_map, addr), E_ACCOUNT_REGISTERED);
-        let account_id: u64 = ref.n_account + 1;
-        ref.n_account = account_id;
-        table::add(&mut ref.address_map, addr, account_id);
-        table::add(&mut ref.account_map, account_id, addr);
-
-        events::emit_account_event(account_id, addr);
-
-        account_id
     }
 
     public(friend) fun get_spot_account(): signer acquires SpotEscrowAccountCapability {

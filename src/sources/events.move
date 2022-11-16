@@ -59,7 +59,11 @@ module sea::events {
         event_accounts: EventHandle<EventAccount>,
     }
 
-    public entry fun initialize(sea_admin: &signer) {
+    fun init_module(sea_admin: &signer) {
+        initialize(sea_admin);
+    }
+
+    public fun initialize(sea_admin: &signer) {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
         assert!(!exists<EventContainer>(address_of(sea_admin)), E_INITIALIZED);
 
@@ -145,9 +149,9 @@ module sea::events {
         );
     }
 
-    #[test]
-    fun test_events() {
-        let sea_admin = aptos_framework::account::create_account_for_test(@sea);
-        initialize(&sea_admin);
-    }
+    // #[test]
+    // fun test_events() {
+    //     let sea_admin = aptos_framework::account::create_account_for_test(@sea);
+    //     initialize(&sea_admin);
+    // }
 }

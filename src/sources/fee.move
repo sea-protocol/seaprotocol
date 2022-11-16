@@ -32,7 +32,11 @@ module sea::fee {
     const E_INVALID_SHARE:     u64 = 4002;
     const E_INVALID_FEE_LEVEL: u64 = 4003;
 
-    public entry fun initialize(sea_admin: &signer) {
+    fun init_module(sea_admin: &signer) {
+        initialize(sea_admin);
+    }
+
+    public fun initialize(sea_admin: &signer) {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
 
         let fee: table::Table<u64, bool> = table::new();

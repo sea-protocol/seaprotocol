@@ -16,6 +16,8 @@ module sea::amm {
     use std::string::{Self, String};
     use aptos_framework::coin::{Self, Coin};
     use aptos_framework::timestamp;
+    use aptos_framework::event;
+    use aptos_framework::account;
 
     use sealib::u256;
     use sealib::uq64x64;
@@ -51,10 +53,24 @@ module sea::amm {
     const E_INVALID_DAO_FEE:               u64 = 5015;
     const E_POOL_EXISTS:                   u64 = 5016;
 
+    // Events ====================================================
+    struct EventSwap has store, drop {
+        base_in: u64,
+        quote_in: u64,
+        base_out: u64,
+        quote_out: u64,
+        pair_id: u64,
+        fee: u64,
+        base_reserve: u64,
+        quote_reserve: u64,
+        k_last: u128,
+    }
+
     // Pool liquidity pool
     struct Pool<phantom BaseType, phantom QuoteType> has key {
         base_id: u64,
         quote_id: u64,
+        pair_id: u64,
         base_reserve: Coin<BaseType>,
         quote_reserve: Coin<QuoteType>,
         last_timestamp: u64,
@@ -66,6 +82,7 @@ module sea::amm {
         locked: bool,
         fee: u64,
         mining_weight: u64,
+        event_swap: event::EventHandle<EventSwap>,
     }
 
     // AMMConfig global AMM config
@@ -81,7 +98,11 @@ module sea::amm {
     }
 
     // initialize
-    public entry fun initialize(sea_admin: &signer) {
+    fun init_module(sea_admin: &signer) {
+        initialize(sea_admin);
+    }
+
+    public fun initialize(sea_admin: &signer) {
         // init amm config
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
         assert!(!exists<AMMConfig>(address_of(sea_admin)), E_INITIALIZED);
@@ -121,6 +142,7 @@ module sea::amm {
         res_account: &signer,
         base_id: u64,
         quote_id: u64,
+        pair_id: u64,
         fee: u64,
     ) {
         let (name, symbol) = get_lp_name_symbol<B, Q>();
@@ -138,6 +160,7 @@ module sea::amm {
         let pool = Pool<B, Q> {
             base_id: base_id,
             quote_id: quote_id,
+            pair_id: pair_id,
             base_reserve: coin::zero<B>(),
             quote_reserve: coin::zero<Q>(),
             last_timestamp: 0,
@@ -149,6 +172,8 @@ module sea::amm {
             locked: false,
             fee: fee,
             mining_weight: 0,
+
+            event_swap: account::new_event_handle<EventSwap>(res_account),
         };
         move_to(res_account, pool);
         coin::register<LP<B, Q>>(res_account);
@@ -236,7 +261,6 @@ module sea::amm {
 
         update_pool<B, Q>(pool, base_reserve, quote_reserve);
         coin::burn(lp, &pool.lp_burn_cap);
-        // todo mint LP fee to admin
 
         (base_coin_to_return, quote_coin_to_return)
     }
@@ -273,6 +297,19 @@ module sea::amm {
         assert_k_increase(base_balance, quote_balance, base_in_vol, quote_in_vol, base_reserve, quote_reserve, pool.fee);
 
         update_pool(pool, base_reserve, quote_reserve);
+
+        // emit event
+        event::emit_event<EventSwap>(&mut pool.event_swap, EventSwap{
+                    base_in: base_in_vol,
+                    quote_in: quote_in_vol,
+                    base_out: base_out,
+                    quote_out: quote_out,
+                    pair_id: pool.pair_id,
+                    fee: pool.fee,
+                    base_reserve: base_reserve,
+                    quote_reserve: quote_reserve,
+                    k_last: pool.k_last,
+                });
 
         (base_swaped, quote_swaped)
     }

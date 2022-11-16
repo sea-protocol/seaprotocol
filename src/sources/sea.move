@@ -41,7 +41,7 @@ module sea::sea {
             sender,
             string::utf8(b"SEA"),
             string::utf8(b"SEA"),
-            4,
+            6,
             true,
         );
         coin::destroy_freeze_cap(freeze_cap);

@@ -40,6 +40,8 @@ module sea::market {
         fee_total: u64,
         fee_maker: u64,
         fee_dao: u64,
+        taker_account_id: u64,
+        maker_account_id: u64,
     }
 
     struct EventOrderComplete has store, drop {
@@ -224,34 +226,39 @@ module sea::market {
     const MAX_U64: u128 = 0xffffffffffffffff;
     const ORDER_ID_MASK_U128: u128 = 0xffffffffff;
 
-    const E_PAIR_NOT_EXIST:      u64 = 1;
-    const E_NO_AUTH:             u64 = 2;
-    const E_QUOTE_CONFIG_EXISTS: u64 = 3;
-    const E_NO_SPOT_MARKET:      u64 = 4;
-    const E_VOL_EXCEED_MAX_U64:  u64 = 5;
-    const E_VOL_EXCEED_MAX_U128: u64 = 6;
-    const E_PAIR_EXISTS:         u64 = 7;
-    const E_PAIR_PRICE_INVALID:  u64 = 8;
-    const E_NOT_QUOTE_COIN:      u64 = 9;
-    const E_EXCEED_PAIR_COUNT:   u64 = 10;
-    const E_BASE_NOT_ENOUGH:     u64 = 11;
-    const E_QUOTE_NOT_ENOUGH:    u64 = 12;
-    const E_PRICE_TOO_LOW:       u64 = 13;
-    const E_PRICE_TOO_HIGH:      u64 = 14;
-    const E_INITIALIZED:         u64 = 15;
-    const E_INVALID_GRID_PRICE:  u64 = 16;
-    const E_GRID_PRICE_BUY:      u64 = 17;
-    const E_GRID_ORDER_COUNT:    u64 = 18;
-    const E_PAIR_PAUSED:         u64 = 19;
-    const E_LOT_SIZE:            u64 = 20;
-    const E_MIN_NOTIONAL:        u64 = 21;
-    const E_PAIR_PRIORITY:       u64 = 22;
-    const E_INVALID_PARAM:       u64 = 23;
-    const E_FOK_NOT_COMPLETE:    u64 = 24;
-    const E_ORDER_ACCOUNT_ID_NOT_EQUAL: u64 = 25;
+    // Errors ====================================================
+    const E_NO_AUTH:                 u64 = 0x100;
+    const E_PAIR_NOT_EXIST:          u64 = 0x101;
+    const E_QUOTE_CONFIG_EXISTS:     u64 = 0x102;
+    const E_NO_SPOT_MARKET:          u64 = 0x103;
+    const E_VOL_EXCEED_MAX_U64:      u64 = 0x104;
+    const E_VOL_EXCEED_MAX_U128:     u64 = 0x105;
+    const E_PAIR_EXISTS:             u64 = 0x106;
+    const E_PAIR_PRICE_INVALID:      u64 = 0x107;
+    const E_NOT_QUOTE_COIN:          u64 = 0x108;
+    const E_EXCEED_PAIR_COUNT:       u64 = 0x109;
+    const E_BASE_NOT_ENOUGH:         u64 = 0x10A;
+    const E_QUOTE_NOT_ENOUGH:        u64 = 0x10B;
+    const E_PRICE_TOO_LOW:           u64 = 0x10C;
+    const E_PRICE_TOO_HIGH:          u64 = 0x10D;
+    const E_INITIALIZED:             u64 = 0x10E;
+    const E_INVALID_GRID_PRICE:      u64 = 0x10F;
+    const E_GRID_PRICE_BUY:          u64 = 0x110;
+    const E_GRID_ORDER_COUNT:        u64 = 0x111;
+    const E_PAIR_PAUSED:             u64 = 0x112;
+    const E_LOT_SIZE:                u64 = 0x113;
+    const E_MIN_NOTIONAL:            u64 = 0x114;
+    const E_PAIR_PRIORITY:           u64 = 0x115;
+    const E_INVALID_PARAM:           u64 = 0x116;
+    const E_FOK_NOT_COMPLETE:        u64 = 0x117;
+    const E_INVALID_PRICE_COEFF:     u64 = 0x118;
+    const E_ORDER_ACCOUNT_NOT_EQUAL: u64 = 0x119;
 
-    // Admin functions ====================================================
-    public entry fun initialize(sea_admin: &signer) {
+    fun init_module(sea_admin: &signer) {
+        initialize(sea_admin);
+    }
+
+    public fun initialize(sea_admin: &signer) {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
         assert!(!exists<NPair>(address_of(sea_admin)), E_INITIALIZED);
         // let signer_cap = spot_account::retrieve_signer_cap(sea_admin);
@@ -262,8 +269,9 @@ module sea::market {
         });
     }
 
+    // Admin functions ====================================================
     /// register_quote only the admin can register quote coin
-    public fun register_quote<QuoteType>(
+    public entry fun register_quote<QuoteType>(
         account: &signer,
         min_notional: u64,
     ) {
@@ -282,7 +290,7 @@ module sea::market {
     }
 
     // pause pair, need admin AUTH
-    public fun pause_pair<B, Q>(
+    public entry fun pause_pair<B, Q>(
         sea_admin: &signer,
     ) acquires Pair {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
@@ -306,7 +314,7 @@ module sea::market {
 
     // Public functions ====================================================
     // register pair, quote should be one of the egliable quote
-    public fun register_pair<B, Q>(
+    public entry fun register_pair<B, Q>(
         owner: &signer,
         fee_level: u64,
         price_coefficient: u64,
@@ -317,6 +325,7 @@ module sea::market {
         assert!(escrow::is_quote_coin<Q>(), E_NOT_QUOTE_COIN);
         assert!(!exists<Pair<B, Q>>(@sea_spot), E_PAIR_EXISTS);
         fee::assert_fee_level_valid(fee_level);
+        assert!(price_coefficient%10 == 0, E_INVALID_PRICE_COEFF);
 
         let base_id = escrow::get_or_register_coin_id<B>(false);
         let quote_id = escrow::get_or_register_coin_id<Q>(true);
@@ -365,7 +374,7 @@ module sea::market {
             event_cancel: account::new_event_handle<EventOrderCancel>(owner),
         };
         // create AMM pool
-        amm::create_pool<B, Q>(&pair_account, base_id, quote_id, fee_level);
+        amm::create_pool<B, Q>(&pair_account, base_id, quote_id, pair_id, fee_level);
         move_to(&pair_account, pair);
 
         events::emit_pair_event<B, Q>(
@@ -434,7 +443,7 @@ module sea::market {
         };
         let account_id = escrow::get_account_id(account_addr);
         let order = rbtree::borrow_by_pos(tree, pos);
-        assert!(order.account_id == account_id, E_ORDER_ACCOUNT_ID_NOT_EQUAL);
+        assert!(order.account_id == account_id, E_ORDER_ACCOUNT_NOT_EQUAL);
 
         (account_id, order.qty, order.grid_id, coin::value(&order.base_frozen), coin::value(&order.quote_frozen))
     }
@@ -500,7 +509,7 @@ module sea::market {
         fok: bool,
     ): u128 acquires Pair, AccountGrids {
         if (fok) {
-            // TODO check this order can be filled
+            // check this order can be filled
             assert!(fok_fill_complete<B, Q>(side, price, qty), E_FOK_NOT_COMPLETE);
         };
         let taker_addr = address_of(account);
@@ -966,6 +975,8 @@ module sea::market {
 
         assert!(!pair.paused, E_PAIR_PAUSED);
         validate_order(pair, order.qty, price);
+        let taker_account_id = escrow::get_or_register_account_id(taker_addr);
+        order.account_id = taker_account_id;
         // let taker_account_id = if (to_escrow) {
         //     escrow::get_or_register_account_id(taker_addr)
         // } else 0;
@@ -980,8 +991,6 @@ module sea::market {
         if ((!completed) && (!opts.is_market) && (!opts.ioc)) {
             // TODO make sure order qty >= lot_size
             // place order to orderbook
-            let taker_account_id = escrow::get_or_register_account_id(taker_addr);
-            order.account_id = taker_account_id;
             
             place_order(taker, opts.side, price, pair, order)
         } else {
@@ -1138,6 +1147,8 @@ module sea::market {
                 fee_total: fee_amt,
                 fee_maker: fee_maker,
                 fee_dao: fee_plat,
+                taker_account_id: taker_order.account_id,
+                maker_account_id: order.account_id,
             });
 
             if (remove_order) {
@@ -1669,7 +1680,7 @@ module sea::market {
     }
 
     #[test]
-    #[expected_failure(abort_code = 3)] // E_QUOTE_CONFIG_EXISTS
+    #[expected_failure(abort_code = 0x102)] // E_QUOTE_CONFIG_EXISTS
     fun test_register_quote_dup() {
         let sea_admin = test_prepare_account_env();
         // 1. register quote
@@ -1874,7 +1885,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    #[expected_failure(abort_code = 13)] // E_PRICE_TOO_LOW
+    #[expected_failure(abort_code = 0x10C)] // E_PRICE_TOO_LOW
     fun test_e2e_place_postonly_order_failed(
         user1: &signer,
         user2: &signer,
@@ -1891,7 +1902,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    #[expected_failure(abort_code = 14)] // E_PRICE_TOO_HIGH
+    #[expected_failure(abort_code = 0x10D)] // E_PRICE_TOO_HIGH
     fun test_e2e_place_postonly_order_failed2(
         user1: &signer,
         user2: &signer,

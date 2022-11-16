@@ -1,0 +1,12 @@
+[package]
+name = 'SeaMock'
+version = '0.1.0'
+
+[addresses]
+sea = "0x20cea9406e2349568c613140a57988290deb709ae14fed30f29320f9b446abbf"
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-core.git"
+subdir = "aptos-move/framework/aptos-framework"
+# rev = "563e2abff8fa997aec81abe48772af8a20731f76"
+rev = "main"
