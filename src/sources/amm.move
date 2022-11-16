@@ -189,6 +189,16 @@ module sea::amm {
         pool.fee = fee_level;
     }
 
+    public entry fun set_pool_weight<B, Q>(
+        sea_admin: &signer,
+        weight: u64) acquires Pool {
+        assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
+
+        let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
+
+        pool.mining_weight = weight;
+    }
+
     public fun get_min_liquidity(): u64 {
         MIN_LIQUIDITY
     }

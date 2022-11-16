@@ -4,7 +4,8 @@ version = '0.1.0'
 
 # this is the resource account
 [addresses]
-sea_spot = "0xe9d0916444fee21d6cce8409823d9962a304db7889b2cbfd816a7c2561c631d6"
+# sea_spot = "0xe9d0916444fee21d6cce8409823d9962a304db7889b2cbfd816a7c2561c631d6"
+sea_spot = "0xb0611b5263e0c708bc1f27ce4cbeb71711c447184805c90fc8bd8132ab5fa4d"
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"

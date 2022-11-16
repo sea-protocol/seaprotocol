@@ -3,7 +3,7 @@ name = 'SeaInit'
 version = '0.1.0'
 
 [addresses]
-sea = "0x20cea9406e2349568c613140a57988290deb709ae14fed30f29320f9b446abbf"
+sea = "0x1639d77dcc10235c91f135a0a59606df36e60fa67a7757783ffa87a84a390299"
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"

@@ -200,20 +200,6 @@ module sea::market {
     struct AccountGrids has key {
         grid_map: Table<u64, GridConfig>,
     }
-    // struct SpotMarket<phantom BaseType, phantom QuoteType, phantom FeeRatio> has key {
-    //     fee: u64,
-    //     n_pair: u64,
-    //     n_quote: u64,
-    //     quotes: Table<u64, QuoteConfig<QuoteType>>,
-    //     pairs: Table<u64, Pair<B, Q>>
-    // }
-    //
-    // struct SpotCoins has key {
-    //     n_coin: u64,
-    //     n_quote: u64,
-    //     coin_map: Table<TypeInfo, u64>,
-    //     quote_map: Table<TypeInfo, u64>,
-    // }
 
     /// Stores resource account signer capability under Liquidswap account.
     // struct SpotAccountCapability has key { signer_cap: SignerCapability }
@@ -298,6 +284,8 @@ module sea::market {
         pair.paused = true;
     }
 
+    /// modify pair/pool trade fee
+    /// need ADMIN authority
     public entry fun modify_pair_fee<B, Q>(
         sea_admin: &signer,
         fee_level: u64,
@@ -309,6 +297,20 @@ module sea::market {
         pair.fee_ratio = fee_level;
         if (include_amm) {
             amm::modify_pool_fee<B, Q>(sea_admin, fee_level);
+        }
+    }
+
+    /// set pair/pool mining weight
+    public entry fun set_pair_weight<B, Q>(
+        sea_admin: &signer,
+        weight: u64,
+        include_amm: bool) acquires Pair {
+        assert!(address_of(sea_admin) == @sea, E_NO_AUTH);  
+        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+
+        pair.mining_weight = weight;
+        if (include_amm) {
+            amm::set_pool_weight<B, Q>(sea_admin, weight);
         }
     }
 
