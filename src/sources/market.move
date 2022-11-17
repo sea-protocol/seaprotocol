@@ -471,7 +471,7 @@ module sea::market {
         side: u8,
         price: u64,
         qty: u64,
-    ): u128 acquires Pair {
+    ) acquires Pair {
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
 
@@ -499,7 +499,7 @@ module sea::market {
             quote_frozen: coin::zero(),
         };
         // check_init_taker_escrow<BaseType, QuoteType>(account, side);
-        return place_order(account, side, price, pair, order)
+        place_order(account, side, price, pair, order);
     }
 
     public entry fun place_limit_order<B, Q>(
@@ -509,7 +509,7 @@ module sea::market {
         qty: u64,
         ioc: bool,
         fok: bool,
-    ): u128 acquires Pair, AccountGrids {
+    ) acquires Pair, AccountGrids {
         if (fok) {
             // check this order can be filled
             assert!(fok_fill_complete<B, Q>(side, price, qty), E_FOK_NOT_COMPLETE);
@@ -533,15 +533,13 @@ module sea::market {
             quote_frozen: coin::zero(),
         };
 
-        return match<B, Q>(account, price, opts, order)
+        match<B, Q>(account, price, opts, order);
     }
 
     public entry fun place_market_order<B, Q>(
         account: &signer,
         side: u8,
         qty: u64,
-        // from_escrow: bool,
-        // to_escrow: bool,
     ) acquires Pair, AccountGrids {
         let taker_addr = address_of(account);
         let opts = &PlaceOrderOpts {
@@ -844,6 +842,7 @@ module sea::market {
         qty: u64,
         price: u64,
     ) {
+        // todo price * price_coeff < u128
         assert!(filter_lot_size(qty, pair.lot_size), E_LOT_SIZE);
         assert!(filter_min_notional(pair, qty, price), E_MIN_NOTIONAL);
     }
