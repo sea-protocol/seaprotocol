@@ -17,7 +17,7 @@ module sea::market {
     use aptos_framework::block;
     use aptos_framework::event;
     use aptos_std::table::{Self, Table};
-    use aptos_std::type_info::{Self, TypeInfo};
+    use aptos_std::type_info::{TypeInfo};
     use aptos_framework::account;
 
     use sealib::rbtree::{Self, RBTree};
@@ -205,12 +205,12 @@ module sea::market {
     // struct SpotAccountCapability has key { signer_cap: SignerCapability }
 
     // Constants ====================================================
-    const BUY: u8 = 1;
-    const SELL: u8 = 2;
-    const MAX_PAIR_ID: u64 = 0xffffff;
-    const ORDER_ID_MASK: u64 = 0xffffffffff;
-    const MAX_U64: u128 = 0xffffffffffffffff;
-    const ORDER_ID_MASK_U128: u128 = 0xffffffffff;
+    const BUY:                u8   = 1;
+    const SELL:               u8   = 2;
+    const MAX_PAIR_ID:        u64  = 0xffffff;
+    const ORDER_ID_MASK:      u64  = 0xffffffffff; // 40 bit
+    const MAX_U64:            u128 = 0xffffffffffffffff;
+    const ORDER_ID_MASK_U128: u128 = 0xffffffffff; // 40 bit
 
     // Errors ====================================================
     const E_NO_AUTH:                 u64 = 0x100;
@@ -390,80 +390,41 @@ module sea::market {
         );
     }
 
-    public entry fun get_pair_info<B, Q>(): PairInfo acquires Pair {
-        let pair = borrow_global<Pair<B, Q>>(@sea_spot);
-        let bid0 = if (rbtree::is_empty(&pair.bids)) {
-            0
-        } else {
-            price_from_key(rbtree::get_leftmost_key(&pair.bids))
-        };
+    // public entry fun get_pair_info<B, Q>(): PairInfo acquires Pair {
+    //     let pair = borrow_global<Pair<B, Q>>(@sea_spot);
+    //     let bid0 = if (rbtree::is_empty(&pair.bids)) {
+    //         0
+    //     } else {
+    //         price_from_key(rbtree::get_leftmost_key(&pair.bids))
+    //     };
 
-        let ask0 = if (rbtree::is_empty(&pair.asks)) {
-            0
-        } else {
-            price_from_key(rbtree::get_leftmost_key(&pair.asks))
-        };
+    //     let ask0 = if (rbtree::is_empty(&pair.asks)) {
+    //         0
+    //     } else {
+    //         price_from_key(rbtree::get_leftmost_key(&pair.asks))
+    //     };
 
-        PairInfo {
-            base_info: type_info::type_of<B>(),
-            quote_info: type_info::type_of<Q>(),
-            paused: pair.paused,
-            n_order: pair.n_order,
-            n_grid: pair.n_grid,
-            fee_ratio: pair.fee_ratio,
-            base_id: pair.base_id,
-            quote_id: pair.quote_id,
-            pair_id: pair.pair_id,
-            lot_size: pair.lot_size,
-            price_ratio: pair.price_ratio,       // price_coefficient*pow(10, base_precision-quote_precision)
-            price_coefficient: pair.price_coefficient, // price coefficient, from 10^1 to 10^12
-            last_price: pair.last_price,        // last trade price
-            last_timestamp: pair.last_timestamp,    // last trade timestamp
-            ask0: ask0,
-            ask_orders: rbtree::length(&pair.asks),
-            bid0: bid0,
-            bid_orders: rbtree::length(&pair.bids),
-        }
-    }
-
-    // return: account_id
-    // return: grid_id
-    // return: base_frozen
-    // return: quote_frozen
-    public entry fun get_order_info<B, Q>(
-        account: &signer,
-        side: u8,
-        order_key: u128,
-    ): (u64, u64, u64, u64, u64) acquires Pair {
-        let account_addr = address_of(account);
-        let pair = borrow_global<Pair<B, Q>>(@sea_spot);
-        let tree = if (side == SELL) &pair.asks else &pair.bids;
-
-        let pos = rbtree::rb_find(tree, order_key);
-        if (pos == 0) {
-            return (0, 0,  0, 0, 0)
-        };
-        let account_id = escrow::get_account_id(account_addr);
-        let order = rbtree::borrow_by_pos(tree, pos);
-        assert!(order.account_id == account_id, E_ORDER_ACCOUNT_NOT_EQUAL);
-
-        (account_id, order.qty, order.grid_id, coin::value(&order.base_frozen), coin::value(&order.quote_frozen))
-    }
-
-    // get_account_pair_orders get account pair orders, both asks and bids
-    // return: (bid orders, ask orders)
-    public entry fun get_account_pair_orders<B, Q>(
-        account: &signer,
-    ): (vector<OrderInfo>, vector<OrderInfo>) acquires Pair {
-        let account_addr = address_of(account);
-        let account_id = escrow::get_account_id(account_addr);
-        let pair = borrow_global<Pair<B, Q>>(@sea_spot);
-
-        (
-            get_account_side_orders(BUY, account_id, &pair.bids),
-            get_account_side_orders(SELL, account_id, &pair.asks)
-        )
-    }
+    //     PairInfo {
+    //         base_info: type_info::type_of<B>(),
+    //         quote_info: type_info::type_of<Q>(),
+    //         paused: pair.paused,
+    //         n_order: pair.n_order,
+    //         n_grid: pair.n_grid,
+    //         fee_ratio: pair.fee_ratio,
+    //         base_id: pair.base_id,
+    //         quote_id: pair.quote_id,
+    //         pair_id: pair.pair_id,
+    //         lot_size: pair.lot_size,
+    //         price_ratio: pair.price_ratio,       // price_coefficient*pow(10, base_precision-quote_precision)
+    //         price_coefficient: pair.price_coefficient, // price coefficient, from 10^1 to 10^12
+    //         last_price: pair.last_price,        // last trade price
+    //         last_timestamp: pair.last_timestamp,    // last trade timestamp
+    //         ask0: ask0,
+    //         ask_orders: rbtree::length(&pair.asks),
+    //         bid0: bid0,
+    //         bid_orders: rbtree::length(&pair.bids),
+    //     }
+    // }
 
     // place post only order
     public entry fun place_postonly_order<B, Q>(
@@ -472,34 +433,7 @@ module sea::market {
         price: u64,
         qty: u64,
     ) acquires Pair {
-        let account_addr = address_of(account);
-        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
-
-        assert!(!pair.paused, E_PAIR_PAUSED);
-        validate_order(pair, qty, price);
-
-        if (side == SELL)  {
-            let bids = &mut pair.bids;
-            if (!rbtree::is_empty(bids)) {
-                let bid0 = get_best_price(bids);
-                assert!(price >= bid0, E_PRICE_TOO_LOW);
-            }
-        } else {
-            let asks = &mut pair.asks;
-            if (!rbtree::is_empty(asks)) {
-                let ask0 = get_best_price(asks);
-                assert!(price <= ask0, E_PRICE_TOO_HIGH);
-            }
-        };
-        let order = OrderEntity{
-            qty: qty,
-            grid_id: 0,
-            account_id: escrow::get_or_register_account_id(account_addr),
-            base_frozen: coin::zero(),
-            quote_frozen: coin::zero(),
-        };
-        // check_init_taker_escrow<BaseType, QuoteType>(account, side);
-        place_order(account, side, price, pair, order);
+        place_postonly_order_return_id<B, Q>(account, side, price, qty);
     }
 
     public entry fun place_limit_order<B, Q>(
@@ -545,8 +479,6 @@ module sea::market {
         let opts = &PlaceOrderOpts {
             addr: taker_addr,
             side: side,
-            // from_escrow: from_escrow,
-            // to_escrow: to_escrow,
             post_only: false,
             ioc: false,
             fok: false,
@@ -660,25 +592,25 @@ module sea::market {
     }
 
     // get pair prices, both asks and bids
-    public entry fun get_pair_price_steps<B, Q>():
-        (u64, vector<PriceStep>, vector<PriceStep>) acquires Pair {
-        let pair = borrow_global<Pair<B, Q>>(@sea_spot);
-        let asks = get_price_steps(&pair.asks);
-        let bids = get_price_steps(&pair.bids);
+    // public entry fun get_pair_price_steps<B, Q>():
+    //     (u64, vector<PriceStep>, vector<PriceStep>) acquires Pair {
+    //     let pair = borrow_global<Pair<B, Q>>(@sea_spot);
+    //     let asks = get_price_steps(&pair.asks);
+    //     let bids = get_price_steps(&pair.bids);
 
-        (block::get_current_block_height(), asks, bids)
-    }
+    //     (block::get_current_block_height(), asks, bids)
+    // }
 
     // get pair keys, both asks and bids
     // key = (price << 64 | order_id)
-    public entry fun get_pair_keys<B, Q>():
-        (u64, vector<OrderKeyQty>, vector<OrderKeyQty>) acquires Pair {
-        let pair = borrow_global<Pair<B, Q>>(@sea_spot);
-        let asks = get_order_key_qty_list(&pair.asks);
-        let bids = get_order_key_qty_list(&pair.bids);
+    // public entry fun get_pair_keys<B, Q>():
+    //     (u64, vector<OrderKeyQty>, vector<OrderKeyQty>) acquires Pair {
+    //     let pair = borrow_global<Pair<B, Q>>(@sea_spot);
+    //     let asks = get_order_key_qty_list(&pair.asks);
+    //     let bids = get_order_key_qty_list(&pair.bids);
 
-        (block::get_current_block_height(), asks, bids)
-    }
+    //     (block::get_current_block_height(), asks, bids)
+    // }
 
     // when cancel an order, we need order_key, not just order_id
     // order_key = order_price << 64 | order_id
@@ -708,8 +640,84 @@ module sea::market {
         }
     }
 
-    // Private functions ====================================================
+    // Public functions ====================================================
 
+    // return: account_id
+    // return: grid_id
+    // return: base_frozen
+    // return: quote_frozen
+    public fun get_order_info<B, Q>(
+        account: &signer,
+        side: u8,
+        order_key: u128,
+    ): (u64, u64, u64, u64, u64) acquires Pair {
+        let account_addr = address_of(account);
+        let pair = borrow_global<Pair<B, Q>>(@sea_spot);
+        let tree = if (side == SELL) &pair.asks else &pair.bids;
+
+        let pos = rbtree::rb_find(tree, order_key);
+        if (pos == 0) {
+            return (0, 0,  0, 0, 0)
+        };
+        let account_id = escrow::get_account_id(account_addr);
+        let order = rbtree::borrow_by_pos(tree, pos);
+        assert!(order.account_id == account_id, E_ORDER_ACCOUNT_NOT_EQUAL);
+
+        (account_id, order.qty, order.grid_id, coin::value(&order.base_frozen), coin::value(&order.quote_frozen))
+    }
+
+    // get_account_pair_orders get account pair orders, both asks and bids
+    // return: (bid orders, ask orders)
+    public fun get_account_pair_orders<B, Q>(
+        account: &signer,
+    ): (vector<OrderInfo>, vector<OrderInfo>) acquires Pair {
+        let account_addr = address_of(account);
+        let account_id = escrow::get_account_id(account_addr);
+        let pair = borrow_global<Pair<B, Q>>(@sea_spot);
+
+        (
+            get_account_side_orders(BUY, account_id, &pair.bids),
+            get_account_side_orders(SELL, account_id, &pair.asks)
+        )
+    }
+
+    public fun place_postonly_order_return_id<B, Q>(
+        account: &signer,
+        side: u8,
+        price: u64,
+        qty: u64,
+    ): u128 acquires Pair {
+        let account_addr = address_of(account);
+        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+
+        assert!(!pair.paused, E_PAIR_PAUSED);
+        validate_order(pair, qty, price);
+
+        if (side == SELL)  {
+            let bids = &mut pair.bids;
+            if (!rbtree::is_empty(bids)) {
+                let bid0 = get_best_price(bids);
+                assert!(price >= bid0, E_PRICE_TOO_LOW);
+            }
+        } else {
+            let asks = &mut pair.asks;
+            if (!rbtree::is_empty(asks)) {
+                let ask0 = get_best_price(asks);
+                assert!(price <= ask0, E_PRICE_TOO_HIGH);
+            }
+        };
+        let order = OrderEntity{
+            qty: qty,
+            grid_id: 0,
+            account_id: escrow::get_or_register_account_id(account_addr),
+            base_frozen: coin::zero(),
+            quote_frozen: coin::zero(),
+        };
+        return place_order(account, side, price, pair, order)
+    }
+
+    // Private functions ====================================================
+    
     fun incr_pair_grid_id<B, Q>(
         pair: &mut Pair<B, Q>
     ): u64 {
@@ -975,7 +983,9 @@ module sea::market {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
 
         assert!(!pair.paused, E_PAIR_PAUSED);
-        validate_order(pair, order.qty, price);
+        if (price > 0) {
+            validate_order(pair, order.qty, price);
+        };
         let taker_account_id = escrow::get_or_register_account_id(taker_addr);
         order.account_id = taker_account_id;
         // let taker_account_id = if (to_escrow) {
@@ -1927,7 +1937,7 @@ module sea::market {
     ) acquires NPair, Pair, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        let order_key = place_postonly_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000);
+        let order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000);
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000, 10);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT, 11);
         
@@ -1935,7 +1945,7 @@ module sea::market {
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 20);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT, 21);
 
-        let order_key = place_postonly_order<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000);
+        let order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000);
         let usd = calc_quote_vol_for_buy(150130000000, 1500000, 10000000);
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 30);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-usd, 31);
@@ -1957,7 +1967,7 @@ module sea::market {
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        let maker_order_key = place_postonly_order<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000);
+        let maker_order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000);
 
         // partial filled
         place_limit_order<T_BTC, T_USD>(user2, SELL, 150130000000, 1000000, false, false);
@@ -1983,7 +1993,7 @@ module sea::market {
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        let maker_order_key = place_postonly_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000);
+        let maker_order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000);
 
         // partial filled
         place_limit_order<T_BTC, T_USD>(user2, BUY, 150130000000, 1000000, false, false);

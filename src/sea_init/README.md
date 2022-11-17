@@ -10,8 +10,8 @@ aptos move run --assume-yes --function-id 0xbfeab661334042d549d1ddeb49fb28cc3c0e
 
 aptos move run --assume-yes --function-id 0x20cea9406e2349568c613140a57988290deb709ae14fed30f29320f9b446abbf::spot_account::initialize_lp_account --args hex:"`xxd -ps -c10000000  /Users/guotie/guotie/chain/seaprotocol/members/bigwin/seaprotocol/src/sea_lp/build/SeaLP/package-metadata.bcs`"  hex:"`xxd -ps -c10000000  /Users/guotie/guotie/chain/seaprotocol/members/bigwin/seaprotocol/src/sea_lp/build/SeaLP/bytecode_modules/lp.mv`"
 
-aptos move run --profile dev2 --assume-yes --function-id 0x1639d77dcc10235c91f135a0a59606df36e60fa67a7757783ffa87a84a390299::spot_account::initialize_spot_account
+aptos move run --profile dev3 --assume-yes --function-id 0xf5de9e9d7a718c10964a8e5ce32de33c591979e2b2e76a1e58dcc9e6f74480df::spot_account::initialize_spot_account
 
 
-aptos move run --profile dev2 --assume-yes --function-id 0x1639d77dcc10235c91f135a0a59606df36e60fa67a7757783ffa87a84a390299::spot_account::publish_pkg --args hex:"`xxd -ps -c10000000  /Users/guotie/guotie/chain/seaprotocol/members/bigwin/seaprotocol/src/sea_lp/build/SeaLP/package-metadata.bcs`"  hex:"`xxd -ps -c10000000  /Users/guotie/guotie/chain/seaprotocol/members/bigwin/seaprotocol/src/sea_lp/build/SeaLP/bytecode_modules/lp.mv`"
+aptos move run --profile dev3 --assume-yes --function-id 0xf5de9e9d7a718c10964a8e5ce32de33c591979e2b2e76a1e58dcc9e6f74480df::spot_account::publish_pkg --args hex:"`xxd -ps -c10000000  /Users/guotie/guotie/chain/seaprotocol/members/bigwin/seaprotocol/src/sea_lp/build/SeaLP/package-metadata.bcs`"  hex:"`xxd -ps -c10000000  /Users/guotie/guotie/chain/seaprotocol/members/bigwin/seaprotocol/src/sea_lp/build/SeaLP/bytecode_modules/lp.mv`"
 
