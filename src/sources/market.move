@@ -327,7 +327,7 @@ module sea::market {
         assert!(escrow::is_quote_coin<Q>(), E_NOT_QUOTE_COIN);
         assert!(!exists<Pair<B, Q>>(@sea_spot), E_PAIR_EXISTS);
         fee::assert_fee_level_valid(fee_level);
-        assert!(price_coefficient%10 == 0, E_INVALID_PRICE_COEFF);
+        assert!(price_coefficient == 1000000000 || price_coefficient == 1000000, E_INVALID_PRICE_COEFF);
 
         let base_id = escrow::get_or_register_coin_id<B>(false);
         let quote_id = escrow::get_or_register_coin_id<Q>(true);

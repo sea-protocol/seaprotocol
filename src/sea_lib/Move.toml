@@ -3,7 +3,7 @@ name = 'SeaLib'
 version = '0.1.0'
 
 [addresses]
-sealib = "0x7587a895cddb80d22b248603408f460acbdb901c733e01750ab88c71886fc7e6"
+sealib = "0x7587a895cddb80d22b248603408f460acbdb901c733e01750ab88c71886fc7e6" # sealib
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-core.git"
