@@ -33,6 +33,7 @@ module sea::market {
 
     // Events ====================================================
     struct EventTrade has store, drop {
+        taker_side: u8,
         qty: u64,
         quote_qty: u64,
         pair_id: u64,
@@ -1151,6 +1152,7 @@ module sea::market {
                 fee_plat,
                 fee_maker);
             event::emit_event<EventTrade>(event_trade, EventTrade{
+                taker_side: taker_side,
                 qty: match_qty,
                 quote_qty: quote_vol,
                 pair_id: pair.pair_id,
