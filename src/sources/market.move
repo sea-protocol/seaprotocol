@@ -43,6 +43,7 @@ module sea::market {
         fee_dao: u64,
         taker_account_id: u64,
         maker_account_id: u64,
+        maker_order_id: u64,
     }
 
     struct EventOrderComplete has store, drop {
@@ -1118,7 +1119,7 @@ module sea::market {
 
         while (!rbtree::is_empty(orderbook)) {
             let (pos, key, order) = rbtree::borrow_leftmost_keyval_mut(orderbook);
-            let (maker_price, _) = price::get_price_order_id(key);
+            let (maker_price, maker_order_id) = price::get_price_order_id(key);
             if ((!taker_opts.is_market) && 
                     ((taker_side == BUY && price < maker_price) ||
                      (taker_side == SELL && price >  maker_price))
@@ -1162,6 +1163,7 @@ module sea::market {
                 fee_dao: fee_plat,
                 taker_account_id: taker_order.account_id,
                 maker_account_id: order.account_id,
+                maker_order_id: maker_order_id,
             });
 
             if (remove_order) {
