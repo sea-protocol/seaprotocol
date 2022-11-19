@@ -9,6 +9,7 @@
 ///
 module sea::events {
     use std::signer::address_of;
+    use std::string::{String};
     use aptos_framework::event::{Self, EventHandle};
     use aptos_std::type_info::{Self, TypeInfo};
     use aptos_framework::account;
@@ -38,6 +39,9 @@ module sea::events {
     // event register quote
     struct EventQuote has store, drop {
         coin_info: TypeInfo,
+        name: String,
+        symbol: String,
+        decimals: u8,
         coin_id: u64,
         min_notional: u64,
     }
@@ -49,6 +53,9 @@ module sea::events {
 
     struct EventCoin has store, drop {
         coin_id: u64,
+        name: String,
+        symbol: String,
+        decimals: u8,
         coin_info: TypeInfo,
     }
 
@@ -115,6 +122,9 @@ module sea::events {
             EventQuote{
                 coin_info: type_info::type_of<Q>(),
                 coin_id: coin_id,
+                name: coin::name<Q>(),
+                symbol: coin::symbol<Q>(),
+                decimals: coin::decimals<Q>(),
                 min_notional: min_notional,
             },
         );
@@ -129,6 +139,9 @@ module sea::events {
             &mut container.event_coins,
             EventCoin{
                 coin_info: type_info::type_of<Q>(),
+                name: coin::name<Q>(),
+                symbol: coin::symbol<Q>(),
+                decimals: coin::decimals<Q>(),
                 coin_id: coin_id,
             },
         );
