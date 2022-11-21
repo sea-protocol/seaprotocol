@@ -979,17 +979,12 @@ module sea::market {
 
     fun place_order<B, Q>(
         account: &signer,
-        // addr: address,
         side: u8,
         price: u64,
         pair: &mut Pair<B, Q>,
         order: OrderEntity<B, Q>
     ): u128 {
         // fee or buy
-        // init escrow BaseType if not exist
-        // escrow::check_init_account_escrow<B>(account);
-        // init escrow QuoteType if not exist
-        // escrow::check_init_account_escrow<Q>(account);
         // frozen
         let qty = order.qty;
         if (side == SELL) {
@@ -1003,6 +998,7 @@ module sea::market {
         let orderbook = if (side == BUY) &mut pair.bids else &mut pair.asks;
         let key: u128 = generate_key(price, order_id);
 
+        pair.last_timestamp = block::get_current_block_height();
         // event
         event::emit_event<EventOrderPlace>(&mut pair.event_place, EventOrderPlace{
             qty: qty,
