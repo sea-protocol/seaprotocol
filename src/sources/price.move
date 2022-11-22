@@ -55,7 +55,6 @@ module sea::price {
 
     // check the price is valid
     public fun is_valid_price(price: u128): bool {
-        let valid: bool;
         if (price == 0) {
             return false
         };
@@ -74,8 +73,7 @@ module sea::price {
             }
         };
 
-        valid = price < MAX_EFFECTIVE_DIGITS;
-        valid
+        price < MAX_EFFECTIVE_DIGITS
     }
 
     #[test]
@@ -102,12 +100,12 @@ module sea::price {
         use std::vector;
 
         let maxu128: u128 = 0xffffffffffffffffffffffffffffffff;
-        let invalid_prices: vector<u128> = vector[100247, 100001, 234567, 990011,
-        998899, 540001, 780328, 304050, 328764, 846380, 769000, 700201,
-        847320, 456012, 870302, 650934, 544502, 500001, 900001, 900010];
+        let valid_prices: vector<u128> = vector[10207, 10001, 24607, 99011,
+        99899, 5401, 78038, 304050, 38764, 846380, 769000, 70201,
+        847320, 45602, 87302, 65034, 54402, 50001, 90001, 901010];
 
-        while(vector::length(&invalid_prices) > 0) {
-            let price = vector::pop_back<u128>(&mut invalid_prices);
+        while(vector::length(&valid_prices) > 0) {
+            let price = vector::pop_back<u128>(&mut valid_prices);
             loop {
                 let ok = is_valid_price(price);
                 assert!(ok, (price as u64));
@@ -140,10 +138,5 @@ module sea::price {
                 price = price * 10;
             };
         }
-    }
-
-    #[test]
-    fun test_calc_price_ratio() {
-
     }
 }

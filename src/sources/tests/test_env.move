@@ -129,15 +129,15 @@ module sea::test_env {
         create_quote<T_BTC>(&sea_admin, 10000);
 
         // create pair: BTC/USDC
-        create_test_pairs<T_BTC, T_USDC>(&sea_admin, 500, 1000000, 10000);  // lot_size sea: 0.00001
-        create_test_pairs<T_BTC, T_USDT>(&sea_admin, 500, 1000000, 10000); 
-        create_test_pairs<T_ETH, T_USDC>(&sea_admin, 500, 1000000, 100000); // lot_size eth: 0.001
-        create_test_pairs<T_ETH, T_USDT>(&sea_admin, 500, 1000000, 100000);
-        create_test_pairs<T_ETH, T_BTC>(&sea_admin, 500, 100000000, 1000);
-        create_test_pairs<T_SEA, T_USDC>(&sea_admin, 500, 100000000, 1000);  // lot_size sea: 0.001
-        create_test_pairs<T_SEA, T_USDT>(&sea_admin, 500, 100000000, 1000);
-        create_test_pairs<T_SEA, T_BTC>(&sea_admin, 500, 100000000, 1000);
+        create_test_pairs<T_BTC, T_USDC>(&sea_admin, 500, 1000000000, 10000);  // lot_size sea: 0.00001
+        create_test_pairs<T_BTC, T_USDT>(&sea_admin, 500, 1000000000, 10000); 
+        create_test_pairs<T_ETH, T_USDC>(&sea_admin, 500, 1000000000, 100000); // lot_size eth: 0.001
+        create_test_pairs<T_ETH, T_USDT>(&sea_admin, 500, 1000000000, 100000);
+        create_test_pairs<T_ETH, T_BTC>(&sea_admin, 500, 1000000000, 1000);
+        create_test_pairs<T_SEA, T_USDC>(&sea_admin, 500, 1000000000, 1000);  // lot_size sea: 0.001
+        create_test_pairs<T_SEA, T_USDT>(&sea_admin, 500, 1000000000, 1000);
+        create_test_pairs<T_SEA, T_BTC>(&sea_admin, 500, 1000000000, 1000);
 
-        create_test_pairs<T_USDT, T_USDC>(&sea_admin, 500, 1000000, 100); // lot_size: 0.01
+        create_test_pairs<T_USDT, T_USDC>(&sea_admin, 500, 1000000000, 100); // lot_size: 0.01
     }
 }
