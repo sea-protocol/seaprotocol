@@ -589,6 +589,8 @@ module sea::market {
         ) acquires Pair {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         cancel_order_by_key<B, Q>(account, side, order_key, pair);
+
+        pair.last_timestamp = block::get_current_block_height();
     }
 
     public entry fun cancel_batch_orders<B, Q>(
@@ -603,7 +605,9 @@ module sea::market {
             let side = vector::borrow(&sides, i);
             let order_key = vector::borrow(&orders_key, i);
             cancel_order_by_key<B, Q>(account, *side, *order_key, pair);
-        }
+        };
+        
+        pair.last_timestamp = block::get_current_block_height();
     }
 
     // Public functions ====================================================

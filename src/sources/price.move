@@ -20,7 +20,7 @@ module sea::price {
     const E2: u128 = 100;
     const E4: u128 = 10000;
     const E8: u128 = 100000000;
-    const MAX_EFFECTIVE_DIGITS: u128 = 1000000;
+    const MAX_EFFECTIVE_DIGITS: u128 = 100000; // only forex need more digits
     const MAX_U64: u128 = 0xffffffffffffffff;
     // 64 bit
     const ORDER_ID_MASK: u128 = 0xffffffffffffffff;
