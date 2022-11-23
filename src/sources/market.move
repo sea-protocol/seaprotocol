@@ -555,6 +555,7 @@ module sea::market {
                 i = i + 1;
             }
         };
+        pair.last_timestamp = block::get_current_block_height();
     }
 
     // get pair prices, both asks and bids
@@ -683,6 +684,7 @@ module sea::market {
             base_frozen: coin::zero(),
             quote_frozen: coin::zero(),
         };
+        pair.last_timestamp = block::get_current_block_height();
         return place_order(account, side, price, pair, order)
     }
 
@@ -969,6 +971,7 @@ module sea::market {
             opts,
         );
 
+        pair.last_timestamp = block::get_current_block_height();
         if ((!completed) && (!opts.is_market) && (!opts.ioc)) {
             // TODO make sure order qty >= lot_size
             // place order to orderbook
@@ -1002,7 +1005,6 @@ module sea::market {
         let orderbook = if (side == BUY) &mut pair.bids else &mut pair.asks;
         let key: u128 = generate_key(price, order_id);
 
-        pair.last_timestamp = block::get_current_block_height();
         // event
         event::emit_event<EventOrderPlace>(&mut pair.event_place, EventOrderPlace{
             qty: qty,
@@ -1166,8 +1168,6 @@ module sea::market {
         };
         if (last_price > 0) {
             pair.last_price = last_price;
-            // 
-            pair.last_timestamp = block::get_current_block_height();
         };
 
         // if order is match completed
