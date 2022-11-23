@@ -14,7 +14,8 @@ module sea::market {
     use std::vector;
 
     use aptos_framework::coin::{Self, Coin};
-    use aptos_framework::block;
+    // use aptos_framework::block;
+    use aptos_framework::timestamp;
     use aptos_framework::event;
     use aptos_std::table::{Self, Table};
     use aptos_std::type_info::{TypeInfo};
@@ -44,6 +45,7 @@ module sea::market {
         taker_account_id: u64,
         maker_account_id: u64,
         maker_order_id: u64,
+        timestamp: u64,
     }
 
     struct EventOrderComplete has store, drop {
@@ -555,7 +557,7 @@ module sea::market {
                 i = i + 1;
             }
         };
-        pair.last_timestamp = block::get_current_block_height();
+        pair.last_timestamp = timestamp::now_seconds();
     }
 
     // get pair prices, both asks and bids
@@ -591,7 +593,7 @@ module sea::market {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         cancel_order_by_key<B, Q>(account, side, order_key, pair);
 
-        pair.last_timestamp = block::get_current_block_height();
+        pair.last_timestamp = timestamp::now_seconds();
     }
 
     public entry fun cancel_batch_orders<B, Q>(
@@ -608,7 +610,7 @@ module sea::market {
             cancel_order_by_key<B, Q>(account, *side, *order_key, pair);
         };
 
-        pair.last_timestamp = block::get_current_block_height();
+        pair.last_timestamp = timestamp::now_seconds();
     }
 
     // Public functions ====================================================
@@ -684,7 +686,7 @@ module sea::market {
             base_frozen: coin::zero(),
             quote_frozen: coin::zero(),
         };
-        pair.last_timestamp = block::get_current_block_height();
+        pair.last_timestamp = timestamp::now_seconds();
         return place_order(account, side, price, pair, order)
     }
 
@@ -971,7 +973,7 @@ module sea::market {
             opts,
         );
 
-        pair.last_timestamp = block::get_current_block_height();
+        pair.last_timestamp = timestamp::now_seconds();
         if ((!completed) && (!opts.is_market) && (!opts.ioc)) {
             // TODO make sure order qty >= lot_size
             // place order to orderbook
@@ -1130,6 +1132,7 @@ module sea::market {
                 taker_account_id: taker_order.account_id,
                 maker_account_id: order.account_id,
                 maker_order_id: maker_order_id,
+                timestamp: timestamp::now_seconds(),
             });
 
             if (remove_order) {
