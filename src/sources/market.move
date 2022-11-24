@@ -14,11 +14,10 @@ module sea::market {
     use std::vector;
 
     use aptos_framework::coin::{Self, Coin};
-    // use aptos_framework::block;
     use aptos_framework::timestamp;
     use aptos_framework::event;
     use aptos_std::table::{Self, Table};
-    use aptos_std::type_info::{TypeInfo};
+    // use aptos_std::type_info::{TypeInfo};
     use aptos_framework::account;
 
     use sealib::rbtree::{Self, RBTree};
