@@ -120,27 +120,6 @@ module sea::market {
         quote_frozen: Coin<QuoteType>,
     }
 
-    struct PairInfo has copy, drop {
-        base_info: TypeInfo,
-        quote_info: TypeInfo,
-        paused: bool,
-        n_order: u64,
-        n_grid: u64,
-        fee_ratio: u64,
-        base_id: u64,
-        quote_id: u64,
-        pair_id: u64,
-        lot_size: u64,
-        price_ratio: u64,       // price_coefficient*pow(10, base_precision-quote_precision)
-        price_coefficient: u64, // price coefficient, from 10^1 to 10^12
-        last_price: u64,        // last trade price
-        last_timestamp: u64,    // last trade timestamp
-        ask0: u64,
-        ask_orders: u64,
-        bid0: u64,
-        bid_orders: u64,
-    }
-
     struct Pair<phantom BaseType, phantom QuoteType> has key {
         paused: bool,
         n_order: u64,
@@ -156,6 +135,7 @@ module sea::market {
         price_coefficient: u64, // price coefficient, from 10^1 to 10^12
         last_price: u64,        // last trade price
         last_timestamp: u64,    // last trade timestamp
+        trades: u64,
         asks: RBTree<OrderEntity<BaseType, QuoteType>>,
         bids: RBTree<OrderEntity<BaseType, QuoteType>>,
         base_vault: Coin<BaseType>,
@@ -369,6 +349,7 @@ module sea::market {
             price_coefficient: price_coefficient, // price coefficient, from 10^1 to 10^12
             last_price: 0,        // last trade price
             last_timestamp: 0,    // last trade timestamp
+            trades: 0,
             asks: rbtree::empty<OrderEntity<B, Q>>(true),  // less price is in left
             bids: rbtree::empty<OrderEntity<B, Q>>(false),
             base_vault: coin::zero(),
@@ -1077,6 +1058,7 @@ module sea::market {
         let fee_ratio = pair.fee_ratio;
         let price_ratio = pair.price_ratio;
         let last_price = 0;
+        let trades = 0;
         let taker_side = taker_opts.side;
         let (orderbook, peer_tree) = if (taker_side == BUY) {
                 (&mut pair.asks, &mut pair.bids)
@@ -1165,12 +1147,14 @@ module sea::market {
                 };
             };
             last_price = maker_price;
+            trades = trades + 1;
             if (taker_order.qty == 0) {
                 break
             }
         };
         if (last_price > 0) {
             pair.last_price = last_price;
+            pair.trades = pair.trades + trades
         };
 
         // if order is match completed
