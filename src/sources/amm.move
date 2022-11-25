@@ -60,7 +60,7 @@ module sea::amm {
         base_out: u64,
         quote_out: u64,
         pair_id: u64,
-        fee: u64,
+        fee_ratio: u64,
         base_reserve: u64,
         quote_reserve: u64,
         k_last: u128,
@@ -80,7 +80,7 @@ module sea::amm {
         lp_mint_cap: coin::MintCapability<LP<BaseType, QuoteType>>,
         lp_burn_cap: coin::BurnCapability<LP<BaseType, QuoteType>>,
         locked: bool,
-        fee: u64,
+        fee_ratio: u64,
         mining_weight: u64,
         event_swap: event::EventHandle<EventSwap>,
     }
@@ -143,7 +143,7 @@ module sea::amm {
         base_id: u64,
         quote_id: u64,
         pair_id: u64,
-        fee: u64,
+        fee_ratio: u64,
     ) {
         let (name, symbol) = get_lp_name_symbol<B, Q>();
         let (lp_burn_cap, lp_freeze_cap, lp_mint_cap) =
@@ -170,7 +170,7 @@ module sea::amm {
             lp_mint_cap,
             lp_burn_cap,
             locked: false,
-            fee: fee,
+            fee_ratio: fee_ratio,
             mining_weight: 0,
 
             event_swap: account::new_event_handle<EventSwap>(res_account),
@@ -186,7 +186,7 @@ module sea::amm {
         fee::assert_fee_level_valid(fee_level);
         let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
 
-        pool.fee = fee_level;
+        pool.fee_ratio = fee_level;
     }
 
     public entry fun set_pool_weight<B, Q>(
@@ -304,7 +304,7 @@ module sea::amm {
         let base_balance = coin::value(&mut pool.base_reserve);
         let quote_balance = coin::value(&mut pool.quote_reserve);
 
-        assert_k_increase(base_balance, quote_balance, base_in_vol, quote_in_vol, base_reserve, quote_reserve, pool.fee);
+        assert_k_increase(base_balance, quote_balance, base_in_vol, quote_in_vol, base_reserve, quote_reserve, pool.fee_ratio);
 
         update_pool(pool, base_reserve, quote_reserve);
 
@@ -315,7 +315,7 @@ module sea::amm {
                     base_out: base_out,
                     quote_out: quote_out,
                     pair_id: pool.pair_id,
-                    fee: pool.fee,
+                    fee_ratio: pool.fee_ratio,
                     base_reserve: base_reserve,
                     quote_reserve: quote_reserve,
                     k_last: pool.k_last,
@@ -403,7 +403,7 @@ module sea::amm {
 
         let base_balance = coin::value(&pool.base_reserve);
         let quote_balance = coin::value(&pool.quote_reserve);
-        assert_k_increase(base_balance, quote_balance, amount_base_in, amount_quote_in, base_reserve, quote_reserve, pool.fee);
+        assert_k_increase(base_balance, quote_balance, amount_base_in, amount_quote_in, base_reserve, quote_reserve, pool.fee_ratio);
         // update internal
         update_pool(pool, base_reserve, quote_reserve);
 
@@ -416,7 +416,7 @@ module sea::amm {
         let base_reserve = coin::value(&pool.base_reserve);
         let quote_reserve = coin::value(&pool.quote_reserve);
 
-        (base_reserve, quote_reserve, pool.fee)
+        (base_reserve, quote_reserve, pool.fee_ratio)
     }
 
     // Private functions ====================================================
