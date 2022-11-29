@@ -64,6 +64,7 @@ module sea::amm {
         base_reserve: u64,
         quote_reserve: u64,
         k_last: u128,
+        timestamp: u64,
     }
 
     // Pool liquidity pool
@@ -319,6 +320,7 @@ module sea::amm {
                     base_reserve: base_reserve,
                     quote_reserve: quote_reserve,
                     k_last: pool.k_last,
+                    timestamp: timestamp::now_seconds(),
                 });
 
         (base_swaped, quote_swaped)
