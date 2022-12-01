@@ -79,6 +79,19 @@ module sea::market {
         account_id: u64,
     }
 
+    // place grid order
+    struct EventGrid has store, drop {
+        qty: u64,
+        grid_id: u64,
+        pair_id: u64,
+        account_id: u64,
+        buy_price0: u64,
+        buy_orders: u64,
+        sell_price0: u64,
+        sell_orders: u64,
+        grid_opts: u64
+    }
+
     // Structs ====================================================
 
     struct PlaceOrderOpts has copy, drop {
@@ -144,6 +157,7 @@ module sea::market {
         event_trade: event::EventHandle<EventTrade>,
         event_place: event::EventHandle<EventOrderPlace>,
         event_cancel: event::EventHandle<EventOrderCancel>,
+        event_grid: event::EventHandle<EventGrid>,
     }
 
     struct QuoteConfig<phantom QuoteType> has key {
@@ -358,6 +372,7 @@ module sea::market {
             event_complete: account::new_event_handle<EventOrderComplete>(owner),
             event_place: account::new_event_handle<EventOrderPlace>(owner),
             event_cancel: account::new_event_handle<EventOrderCancel>(owner),
+            event_grid: account::new_event_handle<EventGrid>(owner),
         };
         // create AMM pool
         amm::create_pool<B, Q>(&pair_account, base_id, quote_id, pair_id, fee_level);
@@ -492,6 +507,19 @@ module sea::market {
                 });
         };
 
+        // event
+        event::emit_event<EventGrid>(&mut pair.event_grid, EventGrid{
+            qty: per_qty,
+            grid_id: grid_id,
+            pair_id: pair.pair_id,
+            account_id: account_id,
+            buy_price0: buy_price0,
+            buy_orders: buy_orders,
+            sell_price0: sell_price0,
+            sell_orders: sell_orders,
+            grid_opts: 0, // todo: add multiple grid type and flip policy
+        });
+
         if (sell_orders > 0)  {
             let bids = &mut pair.bids;
             if (!rbtree::is_empty(bids)) {
@@ -539,27 +567,6 @@ module sea::market {
         };
         pair.last_timestamp = timestamp::now_seconds();
     }
-
-    // get pair prices, both asks and bids
-    // public entry fun get_pair_price_steps<B, Q>():
-    //     (u64, vector<PriceStep>, vector<PriceStep>) acquires Pair {
-    //     let pair = borrow_global<Pair<B, Q>>(@sea_spot);
-    //     let asks = get_price_steps(&pair.asks);
-    //     let bids = get_price_steps(&pair.bids);
-
-    //     (block::get_current_block_height(), asks, bids)
-    // }
-
-    // get pair keys, both asks and bids
-    // key = (price << 64 | order_id)
-    // public entry fun get_pair_keys<B, Q>():
-    //     (u64, vector<OrderKeyQty>, vector<OrderKeyQty>) acquires Pair {
-    //     let pair = borrow_global<Pair<B, Q>>(@sea_spot);
-    //     let asks = get_order_key_qty_list(&pair.asks);
-    //     let bids = get_order_key_qty_list(&pair.bids);
-
-    //     (block::get_current_block_height(), asks, bids)
-    // }
 
     // when cancel an order, we need order_key, not just order_id
     // order_key = order_price << 64 | order_id
