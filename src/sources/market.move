@@ -325,6 +325,7 @@ module sea::market {
         assert!(!exists<Pair<B, Q>>(@sea_spot), E_PAIR_EXISTS);
         fee::assert_fee_level_valid(fee_level);
         assert!(price_coefficient == 1000000000 || price_coefficient == 1000000, E_INVALID_PRICE_COEFF);
+        valid_lot_size(lot_size);
 
         let base_id = escrow::get_or_register_coin_id<B>(false);
         let quote_id = escrow::get_or_register_coin_id<Q>(true);
@@ -818,6 +819,12 @@ module sea::market {
 
     fun filter_lot_size(qty: u64, lot_size: u64): bool {
         (qty / lot_size) * lot_size == qty
+    }
+
+    fun valid_lot_size(lot_size: u64) {
+        assert!(lot_size == 1 || lot_size == 10 || lot_size == 100 ||
+            lot_size == 1000 || lot_size == 10000 || lot_size == 100000 ||
+            lot_size == 1000000 || lot_size == 10000000 || lot_size == 100000000, E_LOT_SIZE)
     }
 
     fun filter_min_notional<B, Q>(
