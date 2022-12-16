@@ -236,6 +236,7 @@ module sea::market {
     const E_FOK_NOT_COMPLETE:        u64 = 0x117;
     const E_INVALID_PRICE_COEFF:     u64 = 0x118;
     const E_ORDER_ACCOUNT_NOT_EQUAL: u64 = 0x119;
+    const E_ORDER_NOT_EXIST:         u64 = 0x120;
 
     fun init_module(sea_admin: &signer) {
         initialize(sea_admin);
@@ -279,6 +280,26 @@ module sea::market {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         pair.paused = true;
+    }
+
+    // withdraw fee
+    public entry fun withdraw_fee<B, Q>(
+        sea_admin: &signer,
+    ) acquires Pair {
+        assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
+        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+        let account_addr = address_of(sea_admin);
+
+        // coin::withdraw(sea);
+        let base_fee = coin::value(&pair.base_vault);
+        if (base_fee > 0) {
+            coin::deposit<B>(account_addr, coin::extract(&mut pair.base_vault, base_fee));
+        };
+
+        let quote_fee = coin::value(&pair.quote_vault);
+        if (quote_fee > 0) {
+            coin::deposit<Q>(account_addr, coin::extract(&mut pair.quote_vault, quote_fee));
+        }
     }
 
     /// modify pair/pool trade fee
@@ -718,9 +739,7 @@ module sea::market {
             // frozen is quote
             let orderbook = &mut pair.bids;
             let pos = rbtree::rb_find(orderbook, order_key);
-            if (pos == 0) {
-                return
-            };
+            assert!(pos != 0, E_ORDER_NOT_EXIST);
             let (_, order) = rbtree::rb_remove_by_pos(orderbook, pos);
             // quote
             // let vol = calc_quote_vol_for_buy(order.qty, price, pair.ratio);
@@ -751,9 +770,8 @@ module sea::market {
         } else {
             let orderbook = &mut pair.asks;
             let pos = rbtree::rb_find(orderbook, order_key);
-            if (pos == 0) {
-                return
-            };
+            assert!(pos != 0, E_ORDER_NOT_EXIST);
+
             let (_, order) = rbtree::rb_remove_by_pos(orderbook, pos);
             let OrderEntity {
                     account_id: account_id,
