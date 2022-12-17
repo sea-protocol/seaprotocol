@@ -25,7 +25,7 @@
 /// 
 module sealib::rbtree {
     use std::vector;
-    use std::debug;
+    // use std::debug;
 
     // Structs ====================================================
     
@@ -421,7 +421,9 @@ module sealib::rbtree {
             let node_left_child = get_node_mut(nodes, node_left_pos);
             set_node_parent<V>(node_left_child, replace_pos);
 
-            if (!replace_is_red) {
+            // 12-17 right_child_pos may be 0
+            if ((!replace_is_red) && (right_child_pos > 0)) {
+            // if ((!replace_is_red) ) {
                 rb_delete_rebalance(tree, right_child_pos, parent_pos);
             };
             // last vector swap
@@ -1080,7 +1082,7 @@ module sealib::rbtree {
         nodes: &vector<RBNode<V>>,
         pos: u64): &RBNode<V> {
         if (pos == 0 || pos > vector::length(nodes))  {
-            debug::print_stack_trace();
+            // debug::print_stack_trace();
             assert!(false, pos);
         };
 
@@ -1190,11 +1192,11 @@ module sealib::rbtree {
         // debug::print(&111111111111);
         // debug::print(&pos);
         if (print) {
-            let s: address = @0x111111111;
-            debug::print(&s);
-            debug::print(&tree.root);
-            debug::print(&tree.leftmost);
-            debug::print(&length(tree));
+            // let s: address = @0x111111111;
+            // debug::print(&s);
+            // debug::print(&tree.root);
+            // debug::print(&tree.leftmost);
+            // debug::print(&length(tree));
         };
         loop {
         // debug::print(&pos);
@@ -1208,8 +1210,8 @@ module sealib::rbtree {
             ) = get_node_info(node);
 
             if (print) {
-                let enode = extract_rbnode(node);
-                debug::print(&enode);
+                // let enode = extract_rbnode(node);
+                // debug::print(&enode);
             };
 
             if (node_parent_pos > 0) {
@@ -1240,8 +1242,8 @@ module sealib::rbtree {
                 let child_is_red = is_red(child.color_parent);
                 assert!(child_pos == node_right_pos, 20);
                 if (pos != child_parent_pos) {
-                    debug::print(&pos);
-                    debug::print(&child_parent_pos);
+                    // debug::print(&pos);
+                    // debug::print(&child_parent_pos);
                 };
                 assert!(pos == child_parent_pos, 21);
                 if (node_is_red) {
@@ -1262,8 +1264,8 @@ module sealib::rbtree {
             nodes = nodes + 1;
         };
         if (print) {
-            let s: address = @0x1111111110000000000000000000000000000000000000000000000000000000;
-            debug::print(&s);
+            // let s: address = @0x1111111110000000000000000000000000000000000000000000000000000000;
+            // debug::print(&s);
         };
         nodes
     }
@@ -1536,6 +1538,81 @@ module sealib::rbtree {
         };
         assert!(tree.root == 0, 0);
         assert!(length(&tree) == 0, 0);
+        tree
+    }
+
+    #[test]
+    fun test_remove_from_root(): RBTree<u128> {
+        let tree = empty<u128>(true);
+        let i: u128 = 0;
+        while (i < 1000) {
+            rb_insert<u128>(&mut tree, i, i);
+            rb_insert<u128>(&mut tree, i+1000, i+1000);
+            i = i + 1;
+        };
+        while (tree.root > 0) {
+            let root = tree.root;
+            rb_remove_by_pos(&mut tree, root);
+        };
+
+        tree
+    }
+
+    #[test]
+    fun test_remove_from_left(): RBTree<u128> {
+        let tree = empty<u128>(true);
+        let i: u128 = 0;
+        while (i < 1000) {
+            rb_insert<u128>(&mut tree, i, i);
+            rb_insert<u128>(&mut tree, i+1000, i+1000);
+            i = i + 1;
+        };
+        while (tree.leftmost > 0) {
+            let leftmost = tree.leftmost;
+            rb_remove_by_pos(&mut tree, leftmost);
+        };
+
+        tree
+    }
+
+    #[test]
+    fun test_remove_from_right(): RBTree<u128> {
+        let tree = empty<u128>(true);
+        let i: u128 = 0;
+        while (i < 1000) {
+            rb_insert<u128>(&mut tree, i, i);
+            rb_insert<u128>(&mut tree, i+1000, i+1000);
+            i = i + 1;
+        };
+        i = 1999;
+        while (i > 0) {
+            rb_remove_by_key(&mut tree, i);
+            i = i - 1;
+        };
+        rb_remove_by_key(&mut tree, 0);
+
+        tree
+    }
+    #[test]
+    fun test_remove_root(): RBTree<u128> {
+        let tree = empty<u128>(false);
+
+        rb_insert<u128>(&mut tree, 27670116110564327425099511627788, 27670116110564327425099511627788);
+        rb_insert<u128>(&mut tree, 27670116110564327425099511627789, 27670116110564327425099511627789);
+        rb_insert<u128>(&mut tree, 29514790517935282586699511627790, 29514790517935282586699511627790);
+        rb_insert<u128>(&mut tree, 30437127721620760167499511627791, 30437127721620760167499511627791);
+        rb_insert<u128>(&mut tree, 30437127721620760167499511627792, 30437127721620760167499511627792);
+
+        // debug::print(&tree);
+
+        rb_remove_by_key(&mut tree, 30437127721620760167499511627792);
+        rb_remove_by_key(&mut tree, 30437127721620760167499511627791);
+        // debug::print(&tree);
+        rb_remove_by_key(&mut tree, 27670116110564327425099511627789);
+        rb_remove_by_key(&mut tree, 27670116110564327425099511627788);
+        rb_remove_by_key(&mut tree, 29514790517935282586699511627790);
+
+        // debug::print(&tree);
         tree
     }
 }
