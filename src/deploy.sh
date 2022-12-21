@@ -29,4 +29,3 @@ aptos move run --function-id 0xf5de9e9d7a718c10964a8e5ce32de33c591979e2b2e76a1e5
 --args u64:10000000  --type-args 0xf5de9e9d7a718c10964a8e5ce32de33c591979e2b2e76a1e58dcc9e6f74480df::mock_coins::USDC --assume-yes --profile dev3
 aptos move run --function-id 0xf5de9e9d7a718c10964a8e5ce32de33c591979e2b2e76a1e58dcc9e6f74480df::market::register_quote \
 --args u64:10000000  --type-args 0xf5de9e9d7a718c10964a8e5ce32de33c591979e2b2e76a1e58dcc9e6f74480df::mock_coins::USDT --assume-yes --profile dev3
-

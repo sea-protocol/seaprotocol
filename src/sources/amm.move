@@ -67,6 +67,16 @@ module sea::amm {
         timestamp: u64,
     }
 
+    struct EventPoolUpdated has store, drop {
+        pair_id: u64,
+        base_reserve: u64,
+        quote_reserve: u64,
+        last_price_x_cumulative: u128,
+        last_price_y_cumulative: u128,
+        k_last: u128,
+        timestamp: u64,
+    }
+
     // Pool liquidity pool
     struct Pool<phantom BaseType, phantom QuoteType> has key {
         base_id: u64,
@@ -84,6 +94,7 @@ module sea::amm {
         fee_ratio: u64,
         mining_weight: u64,
         event_swap: event::EventHandle<EventSwap>,
+        event_pool_updated: event::EventHandle<EventPoolUpdated>,
     }
 
     // AMMConfig global AMM config
@@ -175,6 +186,7 @@ module sea::amm {
             mining_weight: 0,
 
             event_swap: account::new_event_handle<EventSwap>(res_account),
+            event_pool_updated: account::new_event_handle<EventPoolUpdated>(res_account),
         };
         move_to(res_account, pool);
         coin::register<LP<B, Q>>(res_account);
@@ -519,6 +531,15 @@ module sea::amm {
         };
 
         pool.last_timestamp = now_ts;
+        event::emit_event<EventPoolUpdated>(&mut pool.event_pool_updated, EventPoolUpdated{
+                    pair_id: pool.pair_id,
+                    base_reserve: coin::value(&pool.base_reserve),
+                    quote_reserve: coin::value(&pool.quote_reserve),
+                    last_price_x_cumulative: pool.last_price_x_cumulative,
+                    last_price_y_cumulative: pool.last_price_y_cumulative,
+                    k_last: pool.k_last,
+                    timestamp: now_ts,
+                });
     }
 
     fun mint_fee<B, Q>(
