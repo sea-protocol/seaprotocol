@@ -17,12 +17,12 @@ module sea::market {
     use aptos_framework::timestamp;
     use aptos_framework::event;
     use aptos_std::table::{Self, Table};
-    // use aptos_std::type_info::{TypeInfo};
     use aptos_framework::account;
 
     use sealib::rbtree::{Self, RBTree};
     use sealib::math;
 
+    use sea::grid;
     use sea::price;
     use sea::utils;
     use sea::fee;
@@ -89,7 +89,8 @@ module sea::market {
         buy_orders: u64,
         sell_price0: u64,
         sell_orders: u64,
-        grid_opts: u64
+        grid_arith: bool,
+        grid_base_equal: bool,
     }
 
     // Structs ====================================================
@@ -188,10 +189,11 @@ module sea::market {
     }
 
     struct GridConfig has copy, drop, store {
-        qty: u64,
-        delta_price: u64,
-        base_grid: bool,
-        total_flip: bool,
+        arithmetic: bool,
+        delta_price_ratio: u64, // if is geometric, the price is ratio
+        // qty: u64,
+        // base_grid: bool,
+        // total_flip: bool,
     }
 
     struct AccountGrids has key {
@@ -208,6 +210,9 @@ module sea::market {
     const ORDER_ID_MASK:      u64  = 0xffffffffff; // 40 bit, generate order_id
     const MAX_U64:            u128 = 0xffffffffffffffff;
     const ORDER_ID_MASK_U128: u128 = 0xffffffffffffffff; // 64 bit
+
+    const PRICE_DENOMINATE_64:  u64 = 100000;  // grid price ratio
+    const PRICE_DENOMINATE_128: u128 = 100000; // grid price ratio
 
     // Errors ====================================================
     const E_NO_AUTH:                 u64 = 0x100;
@@ -237,6 +242,7 @@ module sea::market {
     const E_INVALID_PRICE_COEFF:     u64 = 0x118;
     const E_ORDER_ACCOUNT_NOT_EQUAL: u64 = 0x119;
     const E_ORDER_NOT_EXIST:         u64 = 0x120;
+    const E_INVALID_QTY:             u64 = 0x121;
 
     fun init_module(sea_admin: &signer) {
         initialize(sea_admin);
@@ -345,7 +351,8 @@ module sea::market {
         assert!(escrow::is_quote_coin<Q>(), E_NOT_QUOTE_COIN);
         assert!(!exists<Pair<B, Q>>(@sea_spot), E_PAIR_EXISTS);
         fee::assert_fee_level_valid(fee_level);
-        assert!(price_coefficient == 1000000000 || price_coefficient == 1000000, E_INVALID_PRICE_COEFF);
+        // assert!(price_coefficient == 1000000000 || price_coefficient == 1000000, E_INVALID_PRICE_COEFF);
+        assert!(price_coefficient == 1000000000, E_INVALID_PRICE_COEFF);
         valid_lot_size(lot_size);
 
         let base_id = escrow::get_or_register_coin_id<B>(false);
@@ -496,8 +503,9 @@ module sea::market {
         buy_orders: u64,
         sell_orders: u64,
         per_qty: u64,
-        delta_price: u64,
-        // from_escrow: bool,
+        delta_price_ratio: u64,
+        arithmetic: bool,
+        base_equal: bool,
     ) acquires Pair, AccountGrids {
         assert!(buy_price0 < sell_price0, E_INVALID_GRID_PRICE);
         assert!(buy_orders + sell_orders >= 2, E_GRID_ORDER_COUNT);
@@ -509,23 +517,26 @@ module sea::market {
 
         let account_id = escrow::get_or_register_account_id(account_addr);
         let grid_id = pair.n_grid + 1;
+
         pair.n_grid = grid_id;
         grid_id = (pair.pair_id << 40) | grid_id;
         if (!exists<AccountGrids>(account_addr)) {
             let map = table::new<u64, GridConfig>();
             table::add(&mut map, grid_id, GridConfig{
-                    qty: per_qty,
-                    delta_price: delta_price,
-                    base_grid: false,
-                    total_flip: false });
+                    delta_price_ratio: delta_price_ratio,
+                    arithmetic: arithmetic,
+                    // base_grid: false,
+                    // total_flip: false 
+                    });
             move_to(account, AccountGrids{ grid_map: map });
         } else {
             let grids = borrow_global_mut<AccountGrids>(account_addr);
             table::add(&mut grids.grid_map, grid_id, GridConfig{
-                    qty: per_qty,
-                    delta_price: delta_price,
-                    base_grid: false,
-                    total_flip: false,
+                    arithmetic: arithmetic,
+                    delta_price_ratio: delta_price_ratio,
+                    // opts: 0,
+                    // base_grid: false,
+                    // total_flip: false,
                 });
         };
 
@@ -539,7 +550,8 @@ module sea::market {
             buy_orders: buy_orders,
             sell_price0: sell_price0,
             sell_orders: sell_orders,
-            grid_opts: 0, // todo: add multiple grid type and flip policy
+            grid_arith: arithmetic,
+            grid_base_equal: base_equal,
         });
 
         if (sell_orders > 0)  {
@@ -551,17 +563,30 @@ module sea::market {
             // check_init_taker_escrow<BaseType, QuoteType>(account, SELL);
             let i = 0;
             let price = sell_price0;
+            let qty;
             while (i < sell_orders) {
+                qty = grid::next_level_qty(
+                    base_equal,
+                    per_qty,
+                    price,
+                    pair.price_ratio,
+                    pair.lot_size,
+                );
                 let order = OrderEntity{
-                    qty: per_qty,
+                    qty: qty,
                     grid_id: grid_id,
                     account_id: account_id,
                     base_frozen: coin::zero(),
                     quote_frozen: coin::zero(),
                 };
                 place_order(account, SELL, price, pair, order);
-                price = price + delta_price;
                 i = i + 1;
+                price = grid::next_level_price(
+                    SELL,
+                    arithmetic,
+                    price,
+                    delta_price_ratio,
+                );
             }
         };
         if (buy_orders > 0) {
@@ -573,18 +598,32 @@ module sea::market {
             // check_init_taker_escrow<BaseType, QuoteType>(account, BUY);
             let i = 0;
             let price = buy_price0;
+            let qty;
             while (i < buy_orders) {
+                qty = grid::next_level_qty(
+                    base_equal,
+                    per_qty,
+                    price,
+                    pair.price_ratio,
+                    pair.lot_size,
+                    );
                 let order = OrderEntity{
-                    qty: per_qty,
+                    qty: qty,
                     grid_id: grid_id,
                     account_id: account_id,
                     base_frozen: coin::zero(),
                     quote_frozen: coin::zero(),
                 };
                 place_order(account, BUY, price, pair, order);
-                assert!(price > delta_price, E_GRID_PRICE_BUY);
-                price = price - delta_price;
+                // assert!(price > delta_price, E_GRID_PRICE_BUY);
+                // price = price - delta_price;
                 i = i + 1;
+                price = grid::next_level_price(
+                    BUY,
+                    arithmetic,
+                    price,
+                    delta_price_ratio,
+                );
             }
         };
         pair.last_timestamp = timestamp::now_seconds();
@@ -592,7 +631,7 @@ module sea::market {
 
     // when cancel an order, we need order_key, not just order_id
     // order_key = order_price << 64 | order_id
-    // FIXME: should we panic is the order_key not found?
+    // FIXME: should we panic is the order_key not found
     public entry fun cancel_order<B, Q>(
         account: &signer,
         side: u8,
@@ -699,8 +738,63 @@ module sea::market {
         return place_order(account, side, price, pair, order)
     }
 
+    // for other module call
+    public fun place_the_order<B, Q>(
+        side: u8,
+        price: u64,
+        order: OrderEntity<B, Q>,
+        ): u128 acquires Pair {
+        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+
+        assert!(!pair.paused, E_PAIR_PAUSED);
+        assert!(order.account_id > 0, E_INVALID_PARAM);
+        let qty: u64;
+        if (side == SELL) {
+            let bids = &mut pair.bids;
+            if (!rbtree::is_empty(bids)) {
+                let bid0 = get_best_price(bids);
+                assert!(price >= bid0, E_PRICE_TOO_LOW);
+            };
+
+            qty = coin::value(&order.base_frozen);
+        } else {
+            let asks = &mut pair.asks;
+            if (!rbtree::is_empty(asks)) {
+                let ask0 = get_best_price(asks);
+                assert!(price <= ask0, E_PRICE_TOO_HIGH);
+            };
+
+            let quote_qty = coin::value(&order.quote_frozen);
+            qty = utils::calc_base_qty(quote_qty, price, pair.price_ratio);
+            if (pair.lot_size > 0) {
+                qty = qty / pair.lot_size * pair.lot_size;
+            };
+            assert!(utils::calc_quote_qty(qty, price, pair.price_ratio) == quote_qty, E_INVALID_QTY);
+        };
+        validate_order(pair, qty, price);
+
+        let order_id = generate_order_id(pair);
+        let orderbook = if (side == BUY) &mut pair.bids else &mut pair.asks;
+        let key: u128 = generate_key(price, order_id);
+
+        // event
+        event::emit_event<EventOrderPlace>(&mut pair.event_place, EventOrderPlace{
+            qty: qty,
+            pair_id: pair.pair_id,
+            order_id: order_id,
+            price: price,
+            side: side,
+            grid_id: order.grid_id,
+            account_id: order.account_id,
+            is_flip: false,
+        });
+        rbtree::rb_insert<OrderEntity<B, Q>>(orderbook, key, order);
+
+        key
+    }
+
     // Private functions ====================================================
-    
+
     fun incr_pair_grid_id<B, Q>(
         pair: &mut Pair<B, Q>
     ): u64 {
@@ -742,8 +836,6 @@ module sea::market {
             assert!(pos != 0, E_ORDER_NOT_EXIST);
             let (_, order) = rbtree::rb_remove_by_pos(orderbook, pos);
             // quote
-            // let vol = calc_quote_vol_for_buy(order.qty, price, pair.ratio);
-            // let unfrozen = escrow::dec_escrow_coin<QuoteType>(account_addr, vol, true);
             let OrderEntity {
                     account_id: account_id,
                     grid_id: grid_id,
@@ -830,7 +922,6 @@ module sea::market {
         qty: u64,
         price: u64,
     ) {
-        // todo price * price_coeff < u128
         assert!(filter_lot_size(qty, pair.lot_size), E_LOT_SIZE);
         assert!(filter_min_notional(pair, qty, price), E_MIN_NOTIONAL);
     }
@@ -987,10 +1078,14 @@ module sea::market {
 
         pair.last_timestamp = timestamp::now_seconds();
         if ((!completed) && (!opts.is_market) && (!opts.ioc)) {
-            // TODO make sure order qty >= lot_size
+            // make sure order qty >= lot_size
             // place order to orderbook
-            
-            place_order(taker, opts.side, price, pair, order)
+            if (pair.lot_size > 0 && order.qty >= pair.lot_size) {
+                place_order(taker, opts.side, price, pair, order)
+            } else {
+                destroy_taker_order(taker, order);
+                0
+            }
         } else {
             destroy_taker_order(taker, order);
 
@@ -1163,16 +1258,29 @@ module sea::market {
 
                 // if is grid order, flip it
                 if (pop_order.grid_id > 0) {
+                    let grid_id = pop_order.grid_id;
+                    let account_id = pop_order.account_id;
                     let n_order_id = pair.pair_id << 40 | (pair.n_order & ORDER_ID_MASK);
                     pair.n_order = pair.n_order + 1;
-                    flip_grid_order(taker_side,
+                    let (nprice, n_qty) = flip_grid_order(taker_side,
                         maker_price,
                         n_order_id,
                         pair.price_ratio,
+                        pair.lot_size,
                         peer_tree,
                         pop_order,
-                        pair.pair_id,
-                        event_place);
+                        );
+
+                    event::emit_event<EventOrderPlace>(event_place, EventOrderPlace{
+                        qty: n_qty,
+                        pair_id: pair.pair_id,
+                        order_id: n_order_id,
+                        price: nprice,
+                        side: taker_side,
+                        grid_id: grid_id,
+                        account_id: account_id,
+                        is_flip: true
+                    });
                 } else {
                     destroy_maker_order<B, Q>(pop_order);
                 };
@@ -1192,26 +1300,36 @@ module sea::market {
         taker_order.qty == 0
     }
 
-    fun get_grid_delta_price(
+    // fun get_grid_delta_price(
+    //     account_addr: address,
+    //     grid_id: u64
+    // ): (u64, u64) acquires AccountGrids {
+    //     let grids = borrow_global<AccountGrids>(account_addr);
+    //     let gc = table::borrow(&grids.grid_map, grid_id);
+    //     (gc.qty, gc.delta_price_ratio)
+    // }
+
+    fun get_grid_config(
         account_addr: address,
         grid_id: u64
-    ): (u64, u64) acquires AccountGrids {
+    ): (bool, u64) acquires AccountGrids {
         let grids = borrow_global<AccountGrids>(account_addr);
         let gc = table::borrow(&grids.grid_map, grid_id);
-        (gc.qty, gc.delta_price)
+        (gc.arithmetic, gc.delta_price_ratio)
     }
 
     // side: the next fliped order's side
+    // return: (nprice, base_qty)
     fun flip_grid_order<B, Q>(
         side: u8,
         maker_price: u64,
         order_id: u64,
         price_ratio: u64,
+        lot_size: u64,
         tree: &mut RBTree<OrderEntity<B, Q>>,
         order: OrderEntity<B, Q>,
-        pair_id: u64,
-        event_place: &mut event::EventHandle<EventOrderPlace>,
-    ) acquires AccountGrids {
+        // pair: &Pair<B, Q>,
+    ): (u64, u64) acquires AccountGrids {
         let OrderEntity {
             qty: _,
             grid_id: grid_id,
@@ -1220,18 +1338,32 @@ module sea::market {
             quote_frozen: quote_frozen,
         } = order;
         let addr = escrow::get_account_addr_by_id(account_id);
-        let (grid_qty, delta_price) = get_grid_delta_price(addr, grid_id);
+        let (grid_arith, delta_price) = get_grid_config(addr, grid_id);
 
         if (side == SELL) {
             // fliped order is SELL order
-            let price = maker_price + delta_price;
             let qty = coin::value(&base_frozen);
+            let (nprice, nqty, _) = grid::calc_grid_order_price_qty(
+                side,
+                grid_arith,
+                maker_price,
+                delta_price,
+                qty,
+                price_ratio,
+                lot_size,
+                );
+            let n_base_frozen = coin::extract(&mut base_frozen, nqty);
             let filp_order = OrderEntity<B, Q> {
-                qty: qty,
+                qty: nqty,
                 grid_id: grid_id,
                 account_id: account_id,
-                base_frozen: base_frozen,
+                base_frozen: n_base_frozen,
                 quote_frozen: coin::zero(),
+            };
+            if (coin::value(&base_frozen) > 0) {
+                coin::deposit<B>(addr, base_frozen);
+            } else {
+                coin::destroy_zero(base_frozen);
             };
             if (coin::value(&quote_frozen) > 0) {
                 // escrow::incr_escrow_coin<QuoteType>(addr, quote_frozen);
@@ -1240,26 +1372,26 @@ module sea::market {
                 coin::destroy_zero(quote_frozen);
             };
             
-            // event
-            event::emit_event<EventOrderPlace>(event_place, EventOrderPlace{
-                qty: qty,
-                pair_id: pair_id,
-                order_id: order_id,
-                price: price,
-                side: side,
-                grid_id: grid_id,
-                account_id: account_id,
-                is_flip: true
-            });
-            rbtree::rb_insert(tree, generate_key(price, order_id), filp_order);
+            rbtree::rb_insert(tree, generate_key(nprice, order_id), filp_order);
+
+            (nprice, nqty)
         } else {
             // flip order is BUY order
-            let price = maker_price - delta_price;
             // let (qty, remnant) = calc_base_qty_can_buy(coin::value(&quote_frozen), price, price_ratio);
-            let quote_needed = calc_quote_vol_for_buy(grid_qty, price, price_ratio);
-            let n_quote_frozen = coin::extract(&mut quote_frozen, quote_needed);
+            // let quote_needed = calc_quote_vol_for_buy(grid_qty, price, price_ratio);
+            let quote_qty = coin::value(&quote_frozen);
+            let (nprice, nqty, nquote_qty) = grid::calc_grid_order_price_qty(
+                side,
+                grid_arith,
+                maker_price,
+                delta_price,
+                quote_qty,
+                price_ratio,
+                lot_size,
+                );
+            let n_quote_frozen = coin::extract(&mut quote_frozen, nquote_qty);
             let filp_order = OrderEntity<B, Q> {
-                qty: grid_qty,
+                qty: nqty,
                 grid_id: grid_id,
                 account_id: account_id,
                 base_frozen: coin::zero(),
@@ -1276,18 +1408,8 @@ module sea::market {
                 coin::destroy_zero(quote_frozen);
             };
 
-            // event
-            event::emit_event<EventOrderPlace>(event_place, EventOrderPlace{
-                qty: grid_qty,
-                pair_id: pair_id,
-                order_id: order_id,
-                price: price,
-                side: side,
-                grid_id: grid_id,
-                account_id: account_id,
-                is_flip: true
-            });
-            rbtree::rb_insert(tree, generate_key(price, order_id), filp_order);
+            rbtree::rb_insert(tree, generate_key(nprice, order_id), filp_order);
+            (nprice, nqty)
         }
     }
 
@@ -2045,10 +2167,12 @@ module sea::market {
         user2: &signer,
         user3: &signer,
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        // use std::debug;
+
         test_register_pair(user1, user2, user3);
 
         place_grid_order<T_BTC, T_USD>(user1, 15013000000000, 15015000000000,
-            5, 5, 1500000, 1000000000);
+            5, 5, 1500000, 1000000000, true, true);
 
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000*5, 50);
         let usd = calc_quote_vol_for_buy(15013000000000, 1500000, 1000000000) +
@@ -2057,6 +2181,8 @@ module sea::market {
                 calc_quote_vol_for_buy(15010000000000, 1500000, 1000000000) +
                 calc_quote_vol_for_buy(15009000000000, 1500000, 1000000000);
 
+        // debug::print(&coin::balance<T_USD>(address_of(user1)));
+        // debug::print(&(T_USD_AMT-usd));
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-usd, 51);
     }
 
@@ -2070,10 +2196,12 @@ module sea::market {
         user2: &signer,
         user3: &signer,
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        // use std::debug;
+
         test_register_pair(user1, user2, user3);
 
         place_grid_order<T_BTC, T_USD>(user1, 15013000000000, 15015000000000,
-            2, 2, 1500000, 1000000000);
+            2, 2, 1500000, 1000000000, true, true);
         // sell orders
         // 150160000000 1500000 s1
         // 150150000000 1500000 s0
@@ -2107,7 +2235,21 @@ module sea::market {
         test_check_account_asset<T_BTC>(address_of(user2), T_BTC_AMT+2500000-fee1-fee2, 60);
         test_check_account_asset<T_USD>(address_of(user2), T_USD_AMT-usd1-usd2, 61);
 
-        let usd_frozen = 150140000000*1500000/10000000 + 150130000000*1500000/10000000 +
+        let vol = utils::calc_quote_qty(1500000, 15015000000000, 1000000000);
+        let (flip_price, flip_qty, _) = grid::calc_grid_order_price_qty(
+            BUY,
+            true,
+            15015000000000,
+            1000000000,
+            vol,
+            1000000000,
+            10,
+        );
+        // debug::print(&flip_price);
+        // debug::print(&flip_qty);
+        assert!(flip_price == 15014000000000, 169);
+
+        let usd_frozen = 150140000000*flip_qty/10000000 + 150130000000*1500000/10000000 +
             150120000000*1500000/10000000 + 150160000000*1000000/10000000;
         let usd_got = 150150000000*1500000/10000000 + 150160000000*1000000/10000000;
 
@@ -2115,7 +2257,7 @@ module sea::market {
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-3000000+maker_fee, 70);
         // let btc_bal = coin::balance<T_USD>(address_of(user1));
         // debug::print(&btc_bal);
-        // debug::print(&(T_USD_AMT-usd_frozen));
+        // debug::print(&(T_USD_AMT-usd_frozen+usd_got));
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-usd_frozen+usd_got, 71);
 
         // the order_key flipped
@@ -2123,8 +2265,8 @@ module sea::market {
         let (_, qty, grid_id, base_frozen, quote_frozen) = get_order_info<T_BTC, T_USD>(user1, BUY, flip_order_key);
         assert!(grid_id == ((1<<40)+1), 110);
         assert!(base_frozen == 0, 111);
-        assert!(qty == 1500000, 113);
-        assert!(quote_frozen == (((15014000000000 as u128)*(1500000 as u128)/(1000000000 as u128)) as u64), 112);
+        assert!(qty == 1500090, 113); // 1500090
+        assert!(quote_frozen == (((15014000000000 as u128)*(qty as u128)/(1000000000 as u128)) as u64), 112);
         // TODO flip twice
         // TODO cancel grid orders
     }
@@ -2142,7 +2284,7 @@ module sea::market {
         test_register_pair(user1, user2, user3);
 
         place_grid_order<T_BTC, T_USD>(user1, 15013000000000, 15015000000000,
-            2, 2, 1500000, 1000000000);
+            2, 2, 1500000, 1000000000, true, true);
         // sell orders
         // 150160000000 1500000
         // 150150000000 1500000

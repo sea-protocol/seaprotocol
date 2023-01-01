@@ -29,4 +29,22 @@ module sea::utils {
             coin::register<CoinType>(account);
         }
     }
+        
+    // quote_qty = qty * price
+    public fun calc_quote_qty(
+        qty: u64,
+        price: u64,
+        price_ratio: u64,
+    ): u64 {
+        (((qty as u128) * (price as u128)/(price_ratio as u128)) as u64)
+    }
+
+    public fun calc_base_qty(
+        quote_qty: u64,
+        price: u64,
+        price_ratio: u64,
+    ): u64 {
+        (((quote_qty as u128) * (price_ratio as u128) / (price as u128)) as u64)
+    }
+
 }

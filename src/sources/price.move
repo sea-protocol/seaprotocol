@@ -29,6 +29,7 @@ module sea::price {
         (((v >> 64) as u64), ((v & ORDER_ID_MASK) as u64))
     }
 
+    // price_coefficient = 1,000,000,000
     // price_ratio = price_coefficient / math.pow(10, quote_decimals-base_decimals)
     // price = price_decimal * price_coefficient
     // quote = base * price / price_ratio = base * price_decimal * math.pow(10, quote_decimals-base_decimals)
@@ -74,6 +75,38 @@ module sea::price {
         };
 
         price < MAX_EFFECTIVE_DIGITS
+    }
+
+    public fun to_valid_price(price: u64): u64 {
+        let max = (MAX_EFFECTIVE_DIGITS as u64);
+        if (price < max) {
+            return price
+        };
+        let times = 1;
+        let mod;
+        loop {
+            if (price / 10000 >= max) {
+                price = price / 10000;
+                times = times * 10000;
+            } else if (price / 1000 >= max) {
+                price = price / 1000;
+                times = times * 1000;
+            }  else if (price / 100 >= max) {
+                price = price / 100;
+                times = times * 100;
+            } else {
+                mod = price % 10;
+                price = price / 10;
+                times = times * 10;
+                if (price < max) {
+                    if (mod >= 5) {
+                        price = price + 1;
+                    };
+                    break
+                }
+            }
+        };
+        return price * times
     }
 
     #[test]
@@ -125,7 +158,7 @@ module sea::price {
         let i: u64 = 1;
         let invalid_prices: vector<u128> = vector[10002347, 1000001, 2345671, 9990011,
         238948362, 543210001, 7803282, 203040506, 32876401, 84638001, 7690001, 70000201,
-        8473201, 4560012, 87093202, 6509324, 5445002, 5000001, 9000001, 90000000010];
+        8473201, 4560012, 87093202, 6509324, 5445002, 5000001, 9000001, 90000500010];
 
         while(vector::length(&invalid_prices) > 0) {
             let price = vector::pop_back<u128>(&mut invalid_prices);
@@ -137,6 +170,27 @@ module sea::price {
                 };
                 price = price * 10;
             };
+        }
+    }
+
+    #[test]
+    fun test_to_valid_price() {
+        use std::vector;
+        // use std::debug;
+        
+        let prices: vector<u64> = vector[10002347, 1000001, 2345671, 9990011,
+        238948362, 543210001, 7803282, 203040506, 32876401, 84638001, 7690001, 70000201,
+        8473201, 4560012, 87093202, 6509324, 5445002, 5000001, 9000001, 90000500010,
+        100023470, 100000100, 2345671000, 99999510000, 100006000000,
+        23894800000, 543210000000, 7803282000000, 20304050000000, 3287640000000,
+         84638000000000, 7690000000000, 70002670000000];
+
+        while(vector::length(&prices) > 0) {
+            let price = vector::pop_back<u64>(&mut prices);
+            let nprice = to_valid_price(price);
+
+            nprice;
+            // debug::print(&nprice);
         }
     }
 }
