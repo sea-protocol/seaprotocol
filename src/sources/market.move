@@ -1519,6 +1519,29 @@ module sea::market {
         ((vol as u64), (fee as u64))
     }
 
+    /*
+    fun swap_internal2<B, Q>(
+        taker_side: u8, // taker side
+        taker_addr: address,
+        pair: &mut Pair<B, Q>,
+        maker_order: &mut OrderEntity<B, Q>,
+        taker_base_in: &mut Coin<B>,
+        taker_base_out: u64,
+        taker_quote_in: &mut Coin<Q>,
+        taker_quote_out: u64,
+        fee_plat_amt: u64,
+        fee_maker_amt: u64,
+    ) {
+        let maker_addr = escrow::get_account_addr_by_id(maker_order.account_id);
+
+        if (taker_side == BUY) {
+
+        } else {
+
+        }
+
+    }
+    */
     // direct transfer coin to taker account
     // increase maker escrow
     fun swap_internal<B, Q>(
