@@ -52,8 +52,8 @@ module sea::mining {
     }
 
     // Public functions ====================================================
-    // when place order, we should initialize user's mint info
-    public fun init_user_mint_info(
+    // user should initialize it's mint info
+    public entry fun init_user_mint_info(
         account: &signer,
     ) {
         if (!exists<UserMintInfo>(address_of(account))) {
@@ -69,10 +69,13 @@ module sea::mining {
         let pool_info = borrow_global_mut<PoolMintInfo>(@sea);
         assert!(pool_info.enabled, E_MINT_DISABLED);
 
+        update_pool_info(pool_info);
         let addr = address_of(account);
         let maker_info = borrow_global_mut<UserMintInfo>(addr);
+        if (maker_info.volume == 0) {
+            return
+        };
 
-        update_pool_info(pool_info);
         let reward = (((maker_info.volume as u128) * (pool_info.pool_sea as u128) / (pool_info.total_volume as u128)) as u64);
         assert!(reward <= pool_info.pool_sea, E_NOT_ENOUGH_SEA);
         sea::mint(account, reward);
@@ -90,9 +93,9 @@ module sea::mining {
         if (!pool_info.enabled) {
             return
         };
-        
+
         if (exists<UserMintInfo>(maker)) {
-            let  maker_info = borrow_global_mut<UserMintInfo>(maker);
+            let maker_info = borrow_global_mut<UserMintInfo>(maker);
             maker_info.volume = maker_info.volume + vol;
             pool_info.total_volume = pool_info.total_volume + vol;
         };
