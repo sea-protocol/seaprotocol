@@ -29,6 +29,7 @@ module sea::market {
     use sea::escrow;
     use sea::amm;
     use sea::events;
+    use sea::mining;
     // use sea::spot_account;
 
     // Events ====================================================
@@ -809,15 +810,10 @@ module sea::market {
         // to_escrow: bool,
         frozen: Coin<CoinType>,
     ) {
-        // if (to_escrow) {
-        //     escrow::check_init_account_escrow<CoinType>(account);
-        //     escrow::incr_escrow_coin(account_addr, frozen);
-        // } else {
-            if (!coin::is_account_registered<CoinType>(account_addr)) {
-                coin::register<CoinType>(account);
-            };
-            coin::deposit(account_addr, frozen);
-        // };
+        if (!coin::is_account_registered<CoinType>(account_addr)) {
+            coin::register<CoinType>(account);
+        };
+        coin::deposit(account_addr, frozen);
     }
 
     fun cancel_order_by_key<B, Q>(
@@ -1242,6 +1238,10 @@ module sea::market {
                 maker_order_id: maker_order_id,
                 timestamp: timestamp::now_seconds(),
             });
+            if (pair.mining_weight > 0) {
+                // mining
+                mining::on_trade(taker, escrow::get_account_addr_by_id(order.account_id), pair.mining_weight * quote_vol);
+            };
 
             if (remove_order) {
                 let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
