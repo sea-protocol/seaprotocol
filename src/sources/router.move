@@ -11,7 +11,7 @@
 /// 
 module sea::router {
     use std::signer::address_of;
-    use std::debug;
+    // use std::debug;
     use aptos_framework::coin::{Self, Coin};
 
     use sea_spot::lp::{LP};
@@ -31,6 +31,13 @@ module sea::router {
     const E_INSUFFICIENT_LIQUIDITY:               u64 = 7006;
     const E_INSUFFICIENT_QUOTE_RESERVE:           u64 = 7007;
     const E_INSUFFICIENT_BASE_RESERVE:            u64 = 7008;
+
+    // hybrid swap
+    public entry fun hybrid_swap<B, Q>(
+        account: &signer,
+    ) {
+        account;
+    }
 
     public entry fun add_liquidity<B, Q>(
         account: &signer,
@@ -191,7 +198,7 @@ module sea::router {
             denominator = ((quote_reserve - amount_out) as u128) * ((fee_deno - fee_ratio) as u128);
         };
 
-        debug::print(&denominator);
+        // debug::print(&denominator);
         ((numerator / denominator + 1) as u64)
     }
 

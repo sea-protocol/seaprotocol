@@ -86,29 +86,25 @@ module sea::mining {
     }
 
     public(friend) fun on_trade(
-        taker: &signer,
-        maker: address,
+        taker_addr: address,
+        maker_addr: address,
         vol: u64) acquires UserMintInfo, PoolMintInfo {
         let pool_info = borrow_global_mut<PoolMintInfo>(@sea);
         if (!pool_info.enabled) {
             return
         };
 
-        if (exists<UserMintInfo>(maker)) {
-            let maker_info = borrow_global_mut<UserMintInfo>(maker);
+        if (exists<UserMintInfo>(maker_addr)) {
+            let maker_info = borrow_global_mut<UserMintInfo>(maker_addr);
             maker_info.volume = maker_info.volume + vol;
             pool_info.total_volume = pool_info.total_volume + vol;
         };
 
-        let addr = address_of(taker);
-        pool_info.total_volume = pool_info.total_volume + vol;
-        if (!exists<UserMintInfo>(addr)) {
-            move_to(taker, UserMintInfo {
-                volume: vol
-            });
+        if (!exists<UserMintInfo>(taker_addr)) {
             return
         };
-        let info = borrow_global_mut<UserMintInfo>(addr);
+        let info = borrow_global_mut<UserMintInfo>(taker_addr);
+        pool_info.total_volume = pool_info.total_volume + vol;
         info.volume = info.volume + vol;
     }
 

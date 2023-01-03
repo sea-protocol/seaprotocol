@@ -1,7 +1,7 @@
 #[test_only]
 module sea::test_router {
     use std::signer;
-    use std::debug;
+    // use std::debug;
 
     use aptos_framework::coin;
 
@@ -198,9 +198,10 @@ module sea::test_router {
         quote_out: u64
     ) {
         let amt_out = router::get_amount_out<B, Q>(base_in, true);
-        debug::print(&amt_out);
-        debug::print(&quote_out);
-        debug::print(&100000000000000001);
+        quote_out;
+        // debug::print(&amt_out);
+        // debug::print(&quote_out);
+        // debug::print(&100000000000000001);
         router::sell_exact_base<T_BTC, T_USDC>(
             user,
             base_in,
@@ -243,9 +244,10 @@ module sea::test_router {
         base_out: u64
     ) {
         let amt_out = router::get_amount_out<B, Q>(quote_in, false);
-        debug::print(&amt_out);
-        debug::print(&base_out);
-        debug::print(&100000000000000002);
+        base_out;
+        // debug::print(&amt_out);
+        // debug::print(&base_out);
+        // debug::print(&100000000000000002);
         router::sell_exact_quote<T_BTC, T_USDC>(
             user,
             quote_in,
@@ -288,9 +290,10 @@ module sea::test_router {
         base_in: u64
     ) {
         let amt_in = router::get_amount_in<B, Q>(quote_out, false);
-        debug::print(&amt_in);
-        debug::print(&base_in);
-        debug::print(&100000000000000003);
+        base_in;
+        // debug::print(&amt_in);
+        // debug::print(&base_in);
+        // debug::print(&100000000000000003);
         router::buy_exact_quote<T_BTC, T_USDC>(
             user,
             quote_out,
@@ -333,9 +336,10 @@ module sea::test_router {
         base_in: u64
     ) {
         let amt_in = router::get_amount_in<B, Q>(quote_out, true);
-        debug::print(&amt_in);
-        debug::print(&base_in);
-        debug::print(&100000000000000003);
+        base_in;
+        // debug::print(&amt_in);
+        // debug::print(&base_in);
+        // debug::print(&100000000000000003);
         router::buy_exact_base<T_BTC, T_USDC>(
             user,
             quote_out,
