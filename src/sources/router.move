@@ -20,7 +20,11 @@ module sea::router {
     use sea::escrow;
     use sea::utils;
     use sea::fee;
+    use sea::market;
     
+    const BUY:                u8   = 1;
+    const SELL:               u8   = 2;
+
     const E_NO_AUTH:                              u64 = 100;
     const E_POOL_NOT_EXIST:                       u64 = 7000;
     const E_INSUFFICIENT_BASE_AMOUNT:             u64 = 7001;
@@ -31,12 +35,53 @@ module sea::router {
     const E_INSUFFICIENT_LIQUIDITY:               u64 = 7006;
     const E_INSUFFICIENT_QUOTE_RESERVE:           u64 = 7007;
     const E_INSUFFICIENT_BASE_RESERVE:            u64 = 7008;
+    const E_INSUFFICIENT_AMOUNT_OUT:              u64 = 7009;
 
     // hybrid swap
     public entry fun hybrid_swap<B, Q>(
         account: &signer,
+        side: u8,
+        amm_base_qty: u64,
+        amm_qty_in: u64,  // buy: this is quote in; sell: this is amm base in
+        ob_base_qty: u64,   // order book base qty
+        ob_price: u64, // order book min/max price
+        ob_vol: u64,   // order book quote qty
+        slip_in_out: u64, // slippage in/out quote volume
     ) {
-        account;
+        let base_out = coin::zero<B>();
+        let quote_out = coin::zero<Q>();
+
+        if (ob_base_qty > 0) {
+            let order = market::new_order<B, Q>(account, side, ob_base_qty, ob_vol, 0, 0);
+            let order_left = market::match_order(account, side, ob_price, order);
+            let (order_base, order_quote) = market::extract_order(order_left);
+            coin::merge(&mut base_out, order_base);
+            coin::merge(&mut quote_out, order_quote);
+        };
+        if (amm_base_qty > 0) {
+            if (side == BUY) {
+                // buy exact base
+                let coin_in = coin::withdraw<Q>(account, amm_qty_in);
+                let coin_out = swap_quote_for_base<B, Q>(coin_in, amm_base_qty);
+                coin::merge(&mut base_out, coin_out);
+            } else {
+                // sell exact base
+                let coin_in = coin::withdraw<B>(account, amm_base_qty);
+                let coin_out  = swap_base_for_quote<B, Q>(coin_in, amm_qty_in);
+                coin::merge(&mut quote_out, coin_out);
+            };
+        };
+        if (side == BUY) {
+            // taker got base
+            assert!(coin::value(&base_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
+        } else {
+            // taker got quote
+            assert!(coin::value(&quote_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
+        };
+
+        let addr = address_of(account);
+        coin::deposit(addr, base_out);
+        coin::deposit(addr, quote_out);
     }
 
     public entry fun add_liquidity<B, Q>(

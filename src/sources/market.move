@@ -732,6 +732,21 @@ module sea::market {
         }
     }
 
+    // extract order
+    public fun extract_order<B, Q>(
+        order: OrderEntity<B, Q>
+    ): (Coin<B>, Coin<Q>) {
+        let OrderEntity {
+                    account_id: _,
+                    grid_id: _,
+                    qty: _,
+                    base_frozen: base_frozen,
+                    quote_frozen: quote_frozen,
+        } = order;
+
+        (base_frozen, quote_frozen)
+    }
+    
     public fun place_postonly_order_return_id<B, Q>(
         account: &signer,
         side: u8,
@@ -777,14 +792,23 @@ module sea::market {
         return place_order(side, price, pair, order)
     }
 
-    // public fun match_order<B, Q>(
-    //     taker: &signer,
-    //     side: u8,
-    //     price: u64,
-    //     order: OrderEntity<B, Q>,
-    // ) acquires Pair {
-    //     let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
-    // }
+    // the caller should extract the left order after matching
+    public fun match_order<B, Q>(
+        taker: &signer,
+        side: u8,
+        price: u64,
+        order: OrderEntity<B, Q>,
+    ): OrderEntity<B, Q> acquires Pair, AccountGrids {
+        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+        assert!(!pair.paused, E_PAIR_PAUSED);
+        let qty = coin::value(&order.base_frozen);
+        validate_order(pair, qty, price);
+
+        match_internal(taker, side, price, pair, &mut order);
+        pair.last_timestamp = timestamp::now_seconds();
+
+        order
+    }
 
     // for other module call
     public fun place_the_order<B, Q>(
@@ -822,25 +846,6 @@ module sea::market {
         validate_order(pair, qty, price);
 
         place_order(side, price, pair, order)
-
-        // let order_id = generate_order_id(pair);
-        // let orderbook = if (side == BUY) &mut pair.bids else &mut pair.asks;
-        // let key: u128 = generate_key(price, order_id);
-
-        // // event
-        // event::emit_event<EventOrderPlace>(&mut pair.event_place, EventOrderPlace{
-        //     qty: qty,
-        //     pair_id: pair.pair_id,
-        //     order_id: order_id,
-        //     price: price,
-        //     side: side,
-        //     grid_id: order.grid_id,
-        //     account_id: order.account_id,
-        //     is_flip: false,
-        // });
-        // rbtree::rb_insert<OrderEntity<B, Q>>(orderbook, key, order);
-
-        // key
     }
 
     // Private functions ====================================================
@@ -1110,10 +1115,10 @@ module sea::market {
 
         let completed = match_internal(
             taker,
+            opts.side,
             price,
             pair,
             &mut order,
-            opts,
         );
 
         pair.last_timestamp = timestamp::now_seconds();
@@ -1229,14 +1234,15 @@ module sea::market {
 
     fun match_internal<B, Q>(
         taker: &signer,
+        taker_side: u8,
         price: u64,
         pair: &mut Pair<B, Q>,
         taker_order: &mut OrderEntity<B, Q>,
-        taker_opts: &PlaceOrderOpts,
+        // taker_opts: &PlaceOrderOpts,
     ): bool acquires AccountGrids {
         let last_price = 0;
         let trades = 0;
-        let taker_side = taker_opts.side;
+        // let taker_side = taker_opts.side;
         let taker_addr = address_of(taker);
         let (orderbook, peer_tree) = if (taker_side == BUY) {
                 (&mut pair.asks, &mut pair.bids)
@@ -1325,7 +1331,7 @@ module sea::market {
 
             if (maker_complete) {
                 let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
-                let maker_side = if (taker_opts.side == BUY) SELL else BUY;
+                let maker_side = if (taker_side == BUY) SELL else BUY;
                 // let (_, maker_order_id) = extract_order_key(pop_order_key);
                 event::emit_event<EventOrderComplete>(event_complete, EventOrderComplete{
                     pair_id: pair.pair_id,
