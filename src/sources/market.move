@@ -120,7 +120,7 @@ module sea::market {
     }
 
     /// OrderEntity order entity. price, pair_id is on OrderBook
-    struct OrderEntity<phantom BaseType, phantom QuoteType> has store {
+    struct OrderEntity<phantom B, phantom Q> has store {
         // base coin amount
         // we use qty to indicate base amount, vol to indicate quote amount
         qty: u64,
@@ -130,11 +130,11 @@ module sea::market {
         // user: address,
         // escrow account id
         account_id: u64,
-        base_frozen: Coin<BaseType>,
-        quote_frozen: Coin<QuoteType>,
+        base_frozen: Coin<B>,
+        quote_frozen: Coin<Q>,
     }
 
-    struct Pair<phantom BaseType, phantom QuoteType> has key {
+    struct Pair<phantom B, phantom Q> has key {
         paused: bool,
         n_order: u64,
         n_grid: u64,
@@ -150,10 +150,10 @@ module sea::market {
         last_price: u64,        // last trade price
         last_timestamp: u64,    // last trade timestamp
         trades: u64,
-        asks: RBTree<OrderEntity<BaseType, QuoteType>>,
-        bids: RBTree<OrderEntity<BaseType, QuoteType>>,
-        base_vault: Coin<BaseType>,
-        quote_vault: Coin<QuoteType>,
+        asks: RBTree<OrderEntity<B, Q>>,
+        bids: RBTree<OrderEntity<B, Q>>,
+        base_vault: Coin<B>,
+        quote_vault: Coin<Q>,
 
         event_complete: event::EventHandle<EventOrderComplete>,
         event_trade: event::EventHandle<EventTrade>,
@@ -244,6 +244,7 @@ module sea::market {
     const E_ORDER_ACCOUNT_NOT_EQUAL: u64 = 0x119;
     const E_ORDER_NOT_EXIST:         u64 = 0x120;
     const E_INVALID_QTY:             u64 = 0x121;
+    const E_INVALID_ACCOUNT_ID:      u64 = 0x122;
 
     fun init_module(sea_admin: &signer) {
         initialize(sea_admin);
@@ -293,18 +294,19 @@ module sea::market {
     public entry fun withdraw_fee<B, Q>(
         sea_admin: &signer,
     ) acquires Pair {
-        assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
-        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         let account_addr = address_of(sea_admin);
+        assert!(account_addr == @sea, E_NO_AUTH);
+        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
 
-        // coin::withdraw(sea);
         let base_fee = coin::value(&pair.base_vault);
         if (base_fee > 0) {
+            utils::register_coin_if_not_exist<B>(sea_admin);
             coin::deposit<B>(account_addr, coin::extract(&mut pair.base_vault, base_fee));
         };
 
         let quote_fee = coin::value(&pair.quote_vault);
         if (quote_fee > 0) {
+            utils::register_coin_if_not_exist<Q>(sea_admin);
             coin::deposit<Q>(account_addr, coin::extract(&mut pair.quote_vault, quote_fee));
         }
     }
@@ -523,7 +525,7 @@ module sea::market {
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         assert!(!pair.paused, E_PAIR_PAUSED);
-        validate_order(pair, per_qty, buy_price0);
+        validate_order_qty_price(pair, per_qty, buy_price0);
 
         let account_id = escrow::get_or_register_account_id(account_addr);
         let grid_id = pair.n_grid + 1;
@@ -607,7 +609,6 @@ module sea::market {
                 let ask0 = get_best_price(asks);
                 assert!(buy_price0 <= ask0, E_PRICE_TOO_HIGH);
             };
-            // check_init_taker_escrow<BaseType, QuoteType>(account, BUY);
             let i = 0;
             let price = buy_price0;
             let qty;
@@ -732,6 +733,22 @@ module sea::market {
         }
     }
 
+    public fun build_order<B, Q>(
+        account_id: u64,
+        grid_id: u64,
+        base_qty: u64,
+        base_frozen: Coin<B>,
+        quote_frozen: Coin<Q>
+    ): OrderEntity<B, Q> {
+        OrderEntity{
+            qty: base_qty,
+            grid_id: grid_id,
+            account_id: account_id,
+            base_frozen: base_frozen,
+            quote_frozen: quote_frozen,
+        }
+    }
+
     // extract order
     public fun extract_order<B, Q>(
         order: OrderEntity<B, Q>
@@ -747,6 +764,30 @@ module sea::market {
         (base_frozen, quote_frozen)
     }
     
+    public fun destroy_order<B, Q>(
+        addr: address,
+        order: OrderEntity<B, Q>
+    ) {
+        let OrderEntity {
+            qty: _,
+            grid_id: _,
+            account_id: _,
+            base_frozen: base_frozen,
+            quote_frozen: quote_frozen,
+        } = order;
+
+        if (coin::value(&base_frozen) > 0) {
+            coin::deposit(addr, base_frozen);
+        } else {
+            coin::destroy_zero(base_frozen);
+        };
+        if (coin::value(&quote_frozen) > 0) {
+            coin::deposit(addr, quote_frozen);
+        } else {
+            coin::destroy_zero(quote_frozen);
+        };
+    }
+
     public fun place_postonly_order_return_id<B, Q>(
         account: &signer,
         side: u8,
@@ -757,7 +798,7 @@ module sea::market {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
 
         assert!(!pair.paused, E_PAIR_PAUSED);
-        validate_order(pair, qty, price);
+        validate_order_qty_price(pair, qty, price);
 
         if (side == SELL)  {
             let bids = &mut pair.bids;
@@ -794,17 +835,16 @@ module sea::market {
 
     // the caller should extract the left order after matching
     public fun match_order<B, Q>(
-        taker: &signer,
+        taker_addr: address,
         side: u8,
         price: u64,
         order: OrderEntity<B, Q>,
     ): OrderEntity<B, Q> acquires Pair, AccountGrids {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         assert!(!pair.paused, E_PAIR_PAUSED);
-        let qty = coin::value(&order.base_frozen);
-        validate_order(pair, qty, price);
+        validate_order(pair, side, price, &order);
 
-        match_internal(taker, side, price, pair, &mut order);
+        match_internal(taker_addr, side, price, pair, &mut order);
         pair.last_timestamp = timestamp::now_seconds();
 
         order
@@ -843,7 +883,7 @@ module sea::market {
             };
             assert!(utils::calc_quote_qty(qty, price, pair.price_ratio) == quote_qty, E_INVALID_QTY);
         };
-        validate_order(pair, qty, price);
+        validate_order_qty_price(pair, qty, price);
 
         place_order(side, price, pair, order)
     }
@@ -942,10 +982,10 @@ module sea::market {
         };
     }
 
-    fun get_account_side_orders<BaseType, QuoteType>(
+    fun get_account_side_orders<B, Q>(
         side: u8,
         account_id: u64,
-        tree: &RBTree<OrderEntity<BaseType, QuoteType>>,
+        tree: &RBTree<OrderEntity<B, Q>>,
     ): vector<OrderInfo> {
         let orders = vector::empty<OrderInfo>();
 
@@ -959,7 +999,7 @@ module sea::market {
                 };
                 pos  = next_pos;
                 key = next_key;
-                item = rbtree::borrow_by_pos<OrderEntity<BaseType, QuoteType>>(tree, next_pos);
+                item = rbtree::borrow_by_pos<OrderEntity<B, Q>>(tree, next_pos);
                 push_order(&mut orders, side, account_id, key, item);
             }
         };
@@ -969,9 +1009,29 @@ module sea::market {
 
     fun validate_order<B, Q>(
         pair: &Pair<B, Q>,
+        side: u8,
+        price: u64,
+        order: &OrderEntity<B, Q>
+    ) {
+        let qty = order.qty;
+        if (side == SELL) {
+            assert!(coin::value(&order.base_frozen) == qty, E_BASE_NOT_ENOUGH);
+        } else {
+            let quote_qty = utils::calc_quote_qty(qty, price, pair.price_ratio);
+            assert!(coin::value(&order.quote_frozen) == quote_qty, E_QUOTE_NOT_ENOUGH);
+        };
+
+        validate_order_qty_price(pair, qty, price);
+    }
+
+    // validate order qty, price, min_notional
+    fun validate_order_qty_price<B, Q>(
+        pair: &Pair<B, Q>,
         qty: u64,
         price: u64,
     ) {
+        assert!(qty >= pair.lot_size, E_LOT_SIZE);
+        assert!(price::is_valid_price(price), E_PAIR_PRICE_INVALID);
         assert!(filter_lot_size(qty, pair.lot_size), E_LOT_SIZE);
         assert!(filter_min_notional(pair, qty, price), E_MIN_NOTIONAL);
     }
@@ -995,12 +1055,12 @@ module sea::market {
         vol >= pair.min_notional
     }
 
-    fun push_order<BaseType, QuoteType>(
+    fun push_order<B, Q>(
         orders: &mut vector<OrderInfo>,
         side: u8,
         account_id: u64,
         key: u128,
-        item: &OrderEntity<BaseType, QuoteType>,
+        item: &OrderEntity<B, Q>,
     ) {
         let (price, order_id) = extract_order_key(key);
         if (item.account_id == account_id) {
@@ -1017,8 +1077,8 @@ module sea::market {
         };
     }
 
-    fun get_price_steps<BaseType, QuoteType>(
-        tree: &RBTree<OrderEntity<BaseType, QuoteType>>
+    fun get_price_steps<B, Q>(
+        tree: &RBTree<OrderEntity<B, Q>>
     ): vector<PriceStep> {
         let steps = vector::empty<PriceStep>();
 
@@ -1039,7 +1099,7 @@ module sea::market {
                 };
 
                 let next_price = price_from_key(next_key);
-                let next_order = rbtree::borrow_by_pos<OrderEntity<BaseType, QuoteType>>(tree, next_pos);
+                let next_order = rbtree::borrow_by_pos<OrderEntity<B, Q>>(tree, next_pos);
                 let next_qty = next_order.qty;
                 if (price == next_price) {
                     qty = qty + next_qty;
@@ -1060,8 +1120,8 @@ module sea::market {
     }
 
     // when we cancel an order, we need the key, not only the order_id
-    fun get_order_key_qty_list<BaseType, QuoteType>(
-        tree: &RBTree<OrderEntity<BaseType, QuoteType>>
+    fun get_order_key_qty_list<B, Q>(
+        tree: &RBTree<OrderEntity<B, Q>>
     ): vector<OrderKeyQty> {
         let orders = vector::empty<OrderKeyQty>();
 
@@ -1110,11 +1170,10 @@ module sea::market {
         let taker_addr = address_of(taker);
 
         assert!(!pair.paused, E_PAIR_PAUSED);
-        assert!(price > 0, E_INVALID_PARAM);
-        validate_order(pair, order.qty, price);
+        validate_order(pair, opts.side, price, &order);
 
         let completed = match_internal(
-            taker,
+            taker_addr,
             opts.side,
             price,
             pair,
@@ -1170,6 +1229,7 @@ module sea::market {
         //     coin::merge(&mut order.quote_frozen, coin::withdraw(account, vol));
         // };
 
+        assert!(order.account_id > 0, E_INVALID_ACCOUNT_ID);
         let order_id = generate_order_id(pair);
         let orderbook = if (side == BUY) &mut pair.bids else &mut pair.asks;
         let key: u128 = generate_key(price, order_id);
@@ -1233,17 +1293,15 @@ module sea::market {
     }
 
     fun match_internal<B, Q>(
-        taker: &signer,
+        taker_addr: address,
         taker_side: u8,
         price: u64,
         pair: &mut Pair<B, Q>,
         taker_order: &mut OrderEntity<B, Q>,
-        // taker_opts: &PlaceOrderOpts,
     ): bool acquires AccountGrids {
         let last_price = 0;
         let trades = 0;
-        // let taker_side = taker_opts.side;
-        let taker_addr = address_of(taker);
+
         let (orderbook, peer_tree) = if (taker_side == BUY) {
                 (&mut pair.asks, &mut pair.bids)
             } else { (&mut pair.bids, &mut pair.asks ) };
@@ -1282,52 +1340,6 @@ module sea::market {
                 // mining
                 mining::on_trade(taker_addr, maker_addr, pair.mining_weight * trade_event.quote_qty);
             };
-
-            /*
-            let match_qty = taker_order.qty;
-            let remove_order = false;
-            if (order.qty <= taker_order.qty) {
-                match_qty = order.qty;
-                // remove this order from orderbook
-                remove_order = true;
-                // if (order.qty == taker_order.qty) completed = true;
-            };
-
-            taker_order.qty = taker_order.qty - match_qty;
-            order.qty = order.qty - match_qty;
-
-            let (quote_vol, fee_amt) = calc_quote_vol(taker_side, match_qty, maker_price, price_ratio, fee_ratio);
-            let (fee_maker, fee_plat) = fee::get_maker_fee_shares(fee_amt, order.grid_id > 0);
-
-            swap_internal<B, Q>(
-                &mut pair.base_vault,
-                &mut pair.quote_vault,
-                taker,
-                taker_opts,
-                order,
-                match_qty,
-                quote_vol,
-                fee_plat,
-                fee_maker);
-            event::emit_event<EventTrade>(event_trade, EventTrade{
-                taker_side: taker_side,
-                qty: match_qty,
-                quote_qty: quote_vol,
-                pair_id: pair.pair_id,
-                price: maker_price,
-                fee_total: fee_amt,
-                fee_maker: fee_maker,
-                fee_dao: fee_plat,
-                taker_account_id: taker_order.account_id,
-                maker_account_id: order.account_id,
-                maker_order_id: maker_order_id,
-                timestamp: timestamp::now_seconds(),
-            });
-            if (pair.mining_weight > 0) {
-                // mining
-                mining::on_trade(taker, escrow::get_account_addr_by_id(order.account_id), pair.mining_weight * quote_vol);
-            };
-            */
 
             if (maker_complete) {
                 let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
@@ -1494,29 +1506,6 @@ module sea::market {
         }
     }
 
-    fun destroy_order<B, Q>(
-        addr: address,
-        order: OrderEntity<B, Q>
-    ) {
-        let OrderEntity {
-            qty: _,
-            grid_id: _,
-            account_id: _,
-            base_frozen: base_frozen,
-            quote_frozen: quote_frozen,
-        } = order;
-
-        if (coin::value(&base_frozen) > 0) {
-            coin::deposit(addr, base_frozen);
-        } else {
-            coin::destroy_zero(base_frozen);
-        };
-        if (coin::value(&quote_frozen) > 0) {
-            coin::deposit(addr, quote_frozen);
-        } else {
-            coin::destroy_zero(quote_frozen);
-        };
-    }
 
     // how many quote is need when buy qty base
     // return: the quote volume needed

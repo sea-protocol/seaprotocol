@@ -16,11 +16,11 @@
 /// 
 module sea::price {
     // Constants ====================================================
-    const E1: u128 = 10;
-    const E2: u128 = 100;
-    const E4: u128 = 10000;
-    const E8: u128 = 100000000;
-    const MAX_EFFECTIVE_DIGITS: u128 = 100000; // only forex need more digits
+    const E1: u64 = 10;
+    const E2: u64 = 100;
+    const E4: u64 = 10000;
+    const E8: u64 = 100000000;
+    const MAX_EFFECTIVE_DIGITS: u64 = 100000; // only forex need more digits
     const MAX_U64: u128 = 0xffffffffffffffff;
     // 64 bit
     const ORDER_ID_MASK: u128 = 0xffffffffffffffff;
@@ -55,7 +55,7 @@ module sea::price {
     }
 
     // check the price is valid
-    public fun is_valid_price(price: u128): bool {
+    public fun is_valid_price(price: u64): bool {
         if (price == 0) {
             return false
         };
@@ -111,13 +111,13 @@ module sea::price {
 
     #[test]
     fun test_valid_price() {
-        let maxu128: u128 = 0xffffffffffffffffffffffffffffffff;
-        let i: u128 = 1;
+        let maxu128: u64 = 0xffffffffffffffff; // 0xffffffffffffffffffffffffffffffff;
+        let i: u64 = 1;
         // while(i <= 100000) {
         while(i <= 100) {
             let price = i;
             loop {
-                let ok = is_valid_price(price);
+                let ok = is_valid_price((price));
                 assert!(ok, (i as u64));
                 if (maxu128 / 10 < price) {
                     break
@@ -132,13 +132,13 @@ module sea::price {
     fun test_valid_price_10k() {
         use std::vector;
 
-        let maxu128: u128 = 0xffffffffffffffffffffffffffffffff;
-        let valid_prices: vector<u128> = vector[10207, 10001, 24607, 99011,
+        let maxu128: u64 = 0xffffffffffffffff; // ffffffffffffffff;
+        let valid_prices: vector<u64> = vector[10207, 10001, 24607, 99011,
         99899, 5401, 78038, 304050, 38764, 846380, 769000, 70201,
         847320, 45602, 87302, 65034, 54402, 50001, 90001, 901010];
 
         while(vector::length(&valid_prices) > 0) {
-            let price = vector::pop_back<u128>(&mut valid_prices);
+            let price = vector::pop_back<u64>(&mut valid_prices);
             loop {
                 let ok = is_valid_price(price);
                 assert!(ok, (price as u64));
@@ -154,14 +154,14 @@ module sea::price {
     fun test_invalid_price() {
         use std::vector;
 
-        let maxu128: u128 = 0xffffffffffffffffffffffffffffffff;
+        let maxu128: u64 = 0xffffffffffffffff; // 0xffffffffffffffffffffffffffffffff;
         let i: u64 = 1;
-        let invalid_prices: vector<u128> = vector[10002347, 1000001, 2345671, 9990011,
+        let invalid_prices: vector<u64> = vector[10002347, 1000001, 2345671, 9990011,
         238948362, 543210001, 7803282, 203040506, 32876401, 84638001, 7690001, 70000201,
         8473201, 4560012, 87093202, 6509324, 5445002, 5000001, 9000001, 90000500010];
 
         while(vector::length(&invalid_prices) > 0) {
-            let price = vector::pop_back<u128>(&mut invalid_prices);
+            let price = vector::pop_back<u64>(&mut invalid_prices);
             loop {
                 let ok = is_valid_price(price);
                 assert!(!ok, (i as u64));

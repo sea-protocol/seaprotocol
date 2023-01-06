@@ -38,7 +38,7 @@ module sea::router {
     const E_INSUFFICIENT_AMOUNT_OUT:              u64 = 7009;
 
     // hybrid swap
-    public entry fun hybrid_swap<B, Q>(
+    public entry fun hybrid_swap_entry<B, Q>(
         account: &signer,
         side: u8,
         amm_base_qty: u64,
@@ -50,10 +50,11 @@ module sea::router {
     ) {
         let base_out = coin::zero<B>();
         let quote_out = coin::zero<Q>();
+        let addr = address_of(account);
 
         if (ob_base_qty > 0) {
             let order = market::new_order<B, Q>(account, side, ob_base_qty, ob_vol, 0, 0);
-            let order_left = market::match_order(account, side, ob_price, order);
+            let order_left = market::match_order(addr, side, ob_price, order);
             let (order_base, order_quote) = market::extract_order(order_left);
             coin::merge(&mut base_out, order_base);
             coin::merge(&mut quote_out, order_quote);
@@ -74,9 +75,11 @@ module sea::router {
         if (side == BUY) {
             // taker got base
             assert!(coin::value(&base_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
+            utils::register_coin_if_not_exist<B>(account);
         } else {
             // taker got quote
             assert!(coin::value(&quote_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
+            utils::register_coin_if_not_exist<Q>(account);
         };
 
         let addr = address_of(account);
@@ -199,6 +202,56 @@ module sea::router {
         coin::transfer<LP<B, Q>>(&escrow::get_spot_account(), to, amount);
     }
 
+    /*
+    // if buy base, provide quote coin
+    // if sell base, provide base coin
+    public fun hybrid_swap<B, Q>(
+        side: u8,
+        addr: address,
+        total_base_in: Coin<B>,
+        total_quote_in: Coin<Q>,
+        amm_base_qty: u64,
+        amm_qty_in: u64,  // buy: this is quote in; sell: this is amm base in
+        ob_base_qty: u64, // order book base qty
+        ob_price: u64, // order book min/max price
+        ob_vol: u64,   // order book quote qty
+        slip_in_out: u64, // slippage in/out quote volume
+    ): (Coin<B>, Coin<Q>) {
+        let base_out = coin::zero<B>();
+        let quote_out = coin::zero<Q>();
+
+        if (ob_base_qty > 0) {
+            let order = market::build_order<B, Q>(account, side, ob_base_qty, ob_vol, 0, 0);
+            let order_left = market::match_order(addr, side, ob_price, order);
+            let (order_base, order_quote) = market::extract_order(order_left);
+            coin::merge(&mut base_out, order_base);
+            coin::merge(&mut quote_out, order_quote);
+        };
+        if (amm_base_qty > 0) {
+            if (side == BUY) {
+                // buy exact base
+                let coin_in = coin::withdraw<Q>(account, amm_qty_in);
+                let coin_out = swap_quote_for_base<B, Q>(coin_in, amm_base_qty);
+                coin::merge(&mut base_out, coin_out);
+            } else {
+                // sell exact base
+                let coin_in = coin::withdraw<B>(account, amm_base_qty);
+                let coin_out  = swap_base_for_quote<B, Q>(coin_in, amm_qty_in);
+                coin::merge(&mut quote_out, coin_out);
+            };
+        };
+        if (side == BUY) {
+            // taker got base
+            assert!(coin::value(&base_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
+        } else {
+            // taker got quote
+            assert!(coin::value(&quote_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
+        };
+
+        (base_out, quote_out)
+    }
+    */
+
     // sell base, buy quote
     public fun swap_base_for_quote<B, Q>(
         coin_in: Coin<B>,
@@ -270,5 +323,10 @@ module sea::router {
         let amount_out = numerator / denominator;
         // debug::print(&amount_out);
         (amount_out as u64)
+    }
+
+    #[test]
+    fun test_hybrid_swap() {
+
     }
 }
