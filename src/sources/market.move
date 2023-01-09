@@ -3366,4 +3366,86 @@ module sea::market {
         // let btc_fee = fee1 + fee21 + fee22;
     }
 
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    #[expected_failure(abort_code = 0x100)]
+    fun test_withdraw_pair_fee_failed(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+        ) acquires NPair, Pair, QuoteConfig {
+        // use std::debug;
+        test_register_pair(user1, user2, user3);
+
+        withdraw_fee<T_BTC, T_USD>(user1);
+
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3,
+        sea_admin = @sea
+    )]
+    fun test_withdraw_pair_fee_zero(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+        sea_admin: &signer
+    ) acquires NPair, Pair, QuoteConfig {
+        // use std::debug;
+        test_register_pair(user1, user2, user3);
+
+        withdraw_fee<T_BTC, T_USD>(sea_admin);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3,
+        sea_admin = @sea
+    )]
+    fun test_withdraw_pair_fee(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+        sea_admin: &signer
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        // use std::debug;
+        test_register_pair(user1, user2, user3);
+        let btc_pair = borrow_global<Pair<T_BTC, T_USD>>(@sea_spot);
+        // let btc_price_ratio = btc_pair.price_ratio;
+        let btc_fee_ratio = btc_pair.fee_ratio;
+
+        // place order
+        let account_id = escrow::get_or_register_account_id(address_of(user1));
+        let quote_qty = utils::calc_quote_qty(100000, 150120000000, 1000000000);
+        let order = new_order<T_BTC, T_USD>(user2, SELL, 100000, quote_qty, account_id, 0);
+        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order);
+
+        // match order
+        let addr3 = address_of(user3);
+        let account3_id = escrow::get_or_register_account_id(addr3);
+        let (_, _, order_sell2) = match_order<T_BTC, T_USD>(
+            addr3,
+            BUY,
+            15012000000000,
+            new_order<T_BTC, T_USD>(user3, BUY, 40000,
+            15012*40000,
+            account3_id,
+            0));
+        destroy_order(addr3, order_sell2);
+
+        // let quote = 40000 * 150120000000 / 1000000000;
+        let base_filled = 40000;
+        let fee_deno = fee::get_fee_denominate();
+        let fee = base_filled * (btc_fee_ratio) / fee_deno;
+        let (_, plat_part) = fee::get_maker_fee_shares(fee, false);
+
+        withdraw_fee<T_BTC, T_USD>(sea_admin);
+        assert!(coin::balance<T_BTC>(address_of(sea_admin)) == plat_part, 10);
+    }
 }
