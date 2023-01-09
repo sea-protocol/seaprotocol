@@ -12,6 +12,7 @@
 module sea::market {
     use std::signer::address_of;
     use std::vector;
+    // use std::debug;
 
     use aptos_framework::coin::{Self, Coin};
     use aptos_framework::timestamp;
@@ -177,16 +178,16 @@ module sea::market {
 
     // price step
     struct PriceStep has copy, drop {
-        price: u64,
         qty: u64,
+        price: u64,
         orders: u64,
     }
 
     // order key, order qty
     // order_key = price << 64 | order_id
     struct OrderKeyQty has copy, drop {
-        key: u128,
         qty: u64,
+        key: u128,
     }
 
     struct GridConfig has copy, drop, store {
@@ -519,14 +520,14 @@ module sea::market {
         arithmetic: bool,
         base_equal: bool,
     ) acquires Pair, AccountGrids {
-        assert!(buy_price0 < sell_price0, E_INVALID_GRID_PRICE);
+        if (buy_orders > 0 && sell_orders > 0) {
+            assert!(buy_price0 < sell_price0, E_INVALID_GRID_PRICE);
+        };
         assert!(buy_orders + sell_orders >= 2, E_GRID_ORDER_COUNT);
         // 
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         assert!(!pair.paused, E_PAIR_PAUSED);
-        validate_order_qty_price(pair, per_qty, buy_price0);
-
         let account_id = escrow::get_or_register_account_id(account_addr);
         let grid_id = pair.n_grid + 1;
 
@@ -578,13 +579,7 @@ module sea::market {
                     pair.price_ratio,
                     pair.lot_size,
                 );
-                // let order = OrderEntity{
-                //     qty: qty,
-                //     grid_id: grid_id,
-                //     account_id: account_id,
-                //     base_frozen: coin::zero(),
-                //     quote_frozen: coin::zero(),
-                // };
+
                 let order = new_order<B, Q>(
                     account,
                     SELL,
@@ -593,6 +588,7 @@ module sea::market {
                     account_id,
                     grid_id,
                 );
+                validate_order_qty_price(pair, qty, price);
                 place_order(SELL, price, pair, order);
                 i = i + 1;
                 price = grid::next_level_price(
@@ -620,6 +616,7 @@ module sea::market {
                     pair.price_ratio,
                     pair.lot_size,
                     );
+                validate_order_qty_price(pair, qty, price);
                 let order = new_order<B, Q>(
                     account,
                     BUY,
@@ -628,16 +625,15 @@ module sea::market {
                     account_id,
                     grid_id,
                 );
+
                 place_order(BUY, price, pair, order);
-                // assert!(price > delta_price, E_GRID_PRICE_BUY);
-                // price = price - delta_price;
-                i = i + 1;
                 price = grid::next_level_price(
                     BUY,
                     arithmetic,
                     price,
                     delta_price_ratio,
                 );
+                i = i + 1;
             }
         };
         pair.last_timestamp = timestamp::now_seconds();
@@ -653,7 +649,15 @@ module sea::market {
         // to_escrow: bool
         ) acquires Pair {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
-        cancel_order_by_key<B, Q>(account, side, order_key, pair);
+        let account_addr = address_of(account);
+
+        if (!coin::is_account_registered<B>(account_addr)) {
+            coin::register<B>(account);
+        };
+        if (!coin::is_account_registered<Q>(account_addr)) {
+            coin::register<Q>(account);
+        };
+        cancel_order_by_key<B, Q>(account_addr, side, order_key, pair);
 
         pair.last_timestamp = timestamp::now_seconds();
     }
@@ -665,11 +669,21 @@ module sea::market {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         assert!(vector::length(&sides) == vector::length(&orders_key), E_INVALID_PARAM);
 
+        let account_addr = address_of(account);
+        if (!coin::is_account_registered<B>(account_addr)) {
+            coin::register<B>(account);
+        };
+        if (!coin::is_account_registered<Q>(account_addr)) {
+            coin::register<Q>(account);
+        };
+
         let i = 0;
         while (i < vector::length(&sides)) {
             let side = vector::borrow(&sides, i);
             let order_key = vector::borrow(&orders_key, i);
-            cancel_order_by_key<B, Q>(account, *side, *order_key, pair);
+            cancel_order_by_key<B, Q>(account_addr, *side, *order_key, pair);
+
+            i = i + 1;
         };
 
         pair.last_timestamp = timestamp::now_seconds();
@@ -839,17 +853,18 @@ module sea::market {
         side: u8,
         price: u64,
         order: OrderEntity<B, Q>,
-    ): OrderEntity<B, Q> acquires Pair, AccountGrids {
+    ): (bool, u64, OrderEntity<B, Q>) acquires Pair, AccountGrids {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         assert!(!pair.paused, E_PAIR_PAUSED);
         validate_order(pair, side, price, &order);
 
-        match_internal(taker_addr, side, price, pair, &mut order);
+        let (completed, filled) = match_internal(taker_addr, side, price, pair, &mut order);
         pair.last_timestamp = timestamp::now_seconds();
 
-        order
+        (completed, filled, order)
     }
 
+    // just place order, same as postonly.
     // for other module call
     public fun place_the_order<B, Q>(
         side: u8,
@@ -898,25 +913,12 @@ module sea::market {
         (pair.pair_id << 40) | grid_id
     }
 
-    fun return_coin_to_account<CoinType>(
-        account: &signer,
-        account_addr: address,
-        // to_escrow: bool,
-        frozen: Coin<CoinType>,
-    ) {
-        if (!coin::is_account_registered<CoinType>(account_addr)) {
-            coin::register<CoinType>(account);
-        };
-        coin::deposit(account_addr, frozen);
-    }
-
     fun cancel_order_by_key<B, Q>(
-        account: &signer,
+        account_addr: address,
         side: u8,
         order_key: u128,
         pair: &mut Pair<B, Q>,
     ) {
-        let account_addr = address_of(account);
         let (price, order_id) = extract_order_key(order_key);
 
         if (side == BUY) {
@@ -943,9 +945,11 @@ module sea::market {
                 grid_id: grid_id,
                 account_id: account_id,
             });
-            return_coin_to_account<Q>(account, account_addr, quote_frozen);
+            // return_coin_to_account<Q>(account, account_addr, quote_frozen);
+            coin::deposit(account_addr, quote_frozen);
             if (grid_id > 0 && coin::value(&base_frozen) > 0) {
-                return_coin_to_account<B>(account, account_addr, base_frozen);
+                // return_coin_to_account<B>(account, account_addr, base_frozen);
+                coin::deposit(account_addr, base_frozen);
             } else {
                 coin::destroy_zero(base_frozen);
             }
@@ -973,9 +977,11 @@ module sea::market {
                 account_id: account_id,
             });
             
-            return_coin_to_account<B>(account, account_addr, base_frozen);
+            // return_coin_to_account<B>(account, account_addr, base_frozen);
+            coin::deposit(account_addr, base_frozen);
             if (grid_id > 0 && coin::value(&quote_frozen) > 0) {
-                return_coin_to_account<Q>(account, account_addr, quote_frozen);
+                // return_coin_to_account<Q>(account, account_addr, quote_frozen);
+                coin::deposit(account_addr, quote_frozen);
             } else {
                 coin::destroy_zero(quote_frozen);
             }
@@ -1085,6 +1091,7 @@ module sea::market {
         if (!rbtree::is_empty(tree)) {
             let (pos, key, item) = rbtree::get_leftmost_pos_key_val(tree);
             let price = price_from_key(key);
+            let next_price;
             let qty: u64 = item.qty;
             let orders: u64 = 1;
             while (true) {
@@ -1098,7 +1105,7 @@ module sea::market {
                     break
                 };
 
-                let next_price = price_from_key(next_key);
+                next_price = price_from_key(next_key);
                 let next_order = rbtree::borrow_by_pos<OrderEntity<B, Q>>(tree, next_pos);
                 let next_qty = next_order.qty;
                 if (price == next_price) {
@@ -1114,6 +1121,7 @@ module sea::market {
                     orders = 1;
                 };
                 pos = next_pos;
+                price = next_price;
             }
         };
         steps
@@ -1165,48 +1173,52 @@ module sea::market {
         pair: &mut Pair<B, Q>,
         price: u64,
         opts: &PlaceOrderOpts,
-        order: OrderEntity<B, Q>
+        taker_order: OrderEntity<B, Q>
     ): u128 acquires AccountGrids {
         let taker_addr = address_of(taker);
 
         assert!(!pair.paused, E_PAIR_PAUSED);
-        validate_order(pair, opts.side, price, &order);
+        validate_order(pair, opts.side, price, &taker_order);
 
-        let completed = match_internal(
+        let (completed, base_filled) = match_internal(
             taker_addr,
             opts.side,
             price,
             pair,
-            &mut order,
+            &mut taker_order,
         );
 
         pair.last_timestamp = timestamp::now_seconds();
         if ((!completed) && (!opts.ioc)) {
             // make sure order qty >= lot_size
             // place order to orderbook
-            if (pair.lot_size > 0 && order.qty >= pair.lot_size) {
-                let nqty = order.qty / pair.lot_size * pair.lot_size;
+            if (pair.lot_size > 0 && taker_order.qty >= pair.lot_size) {
+                let nqty = taker_order.qty / pair.lot_size * pair.lot_size;
                 if (opts.side == BUY) {
                     //
                     let nquote_qty = utils::calc_quote_qty(nqty, price, pair.price_ratio);
-                    let quote_left = coin::value(&order.quote_frozen) - nquote_qty;
+                    let quote_left = coin::value(&taker_order.quote_frozen) - nquote_qty;
                     if (quote_left > 0) {
-                        coin::deposit(taker_addr, coin::extract(&mut order.quote_frozen, quote_left));
+                        coin::deposit(taker_addr, coin::extract(&mut taker_order.quote_frozen, quote_left));
+                    };
+                    if (base_filled > 0) {
+                        // coin::value(&taker_order.base_frozen) + fee = base_filled
+                        coin::deposit(taker_addr, coin::extract_all(&mut taker_order.base_frozen));
                     }
                 } else {
-                    let base_left = order.qty-nqty;
+                    let base_left = taker_order.qty-nqty;
                     if (base_left > 0) {
-                        coin::deposit(taker_addr, coin::extract(&mut order.base_frozen, base_left));
+                        coin::deposit(taker_addr, coin::extract(&mut taker_order.base_frozen, base_left));
                     }
                 };
-                place_order(opts.side, price, pair, order)
+                place_order(opts.side, price, pair, taker_order)
             } else {
-                destroy_order(taker_addr, order);
+                destroy_order(taker_addr, taker_order);
 
                 0
             }
         } else {
-            destroy_order(taker_addr, order);
+            destroy_order(taker_addr, taker_order);
 
             0
         }
@@ -1219,15 +1231,7 @@ module sea::market {
         pair: &mut Pair<B, Q>,
         order: OrderEntity<B, Q>
     ): u128 {
-        // fee or buy
-        // frozen
         let qty = order.qty;
-        // if (side == SELL) {
-        //     coin::merge(&mut order.base_frozen, coin::withdraw(account, qty));
-        // } else {
-        //     let vol = calc_quote_vol_for_buy(qty, price, pair.price_ratio);
-        //     coin::merge(&mut order.quote_frozen, coin::withdraw(account, vol));
-        // };
 
         assert!(order.account_id > 0, E_INVALID_ACCOUNT_ID);
         let order_id = generate_order_id(pair);
@@ -1292,13 +1296,15 @@ module sea::market {
         completed
     }
 
+    // return: bool: if the taker order has completed
+    // return: u64: the filled base qty
     fun match_internal<B, Q>(
         taker_addr: address,
         taker_side: u8,
         price: u64,
         pair: &mut Pair<B, Q>,
         taker_order: &mut OrderEntity<B, Q>,
-    ): bool acquires AccountGrids {
+    ): (bool, u64) acquires AccountGrids {
         let last_price = 0;
         let trades = 0;
 
@@ -1309,6 +1315,9 @@ module sea::market {
         let event_place = &mut pair.event_place;
         let base_fee = coin::zero<B>();
         let quote_fee = coin::zero<Q>();
+        let pair_id = pair.pair_id;
+        let total_filled = 0;
+        let taker_completed: bool = false;
 
         while (!rbtree::is_empty(orderbook)) {
             let (pos, key, order) = rbtree::borrow_leftmost_keyval_mut(orderbook);
@@ -1323,13 +1332,9 @@ module sea::market {
             let maker_addr = escrow::get_account_addr_by_id(order.account_id);
             let (taker_complete, maker_complete, trade_event) = swap_order(
                 taker_side,
-                taker_addr,
-                // pair,
-                pair.pair_id,
                 pair.price_ratio,
                 pair.fee_ratio,
                 maker_price,
-                maker_order_id,
                 maker_addr,
                 taker_order,
                 order,
@@ -1340,13 +1345,17 @@ module sea::market {
                 // mining
                 mining::on_trade(taker_addr, maker_addr, pair.mining_weight * trade_event.quote_qty);
             };
+            total_filled = total_filled + trade_event.qty;
+            trade_event.pair_id = pair_id;
+            trade_event.maker_order_id = maker_order_id;
+            event::emit_event(&mut pair.event_trade, trade_event);
 
             if (maker_complete) {
                 let (_, pop_order) = rbtree::rb_remove_by_pos(orderbook, pos);
                 let maker_side = if (taker_side == BUY) SELL else BUY;
                 // let (_, maker_order_id) = extract_order_key(pop_order_key);
                 event::emit_event<EventOrderComplete>(event_complete, EventOrderComplete{
-                    pair_id: pair.pair_id,
+                    pair_id: pair_id,
                     order_id: maker_order_id,
                     price: maker_price,
                     side: maker_side,
@@ -1358,7 +1367,7 @@ module sea::market {
                 if (pop_order.grid_id > 0) {
                     let grid_id = pop_order.grid_id;
                     let account_id = pop_order.account_id;
-                    let n_order_id = pair.pair_id << 40 | (pair.n_order & ORDER_ID_MASK);
+                    let n_order_id = pair_id << 40 | (pair.n_order & ORDER_ID_MASK);
                     pair.n_order = pair.n_order + 1;
                     let (nprice, n_qty) = flip_grid_order(taker_side,
                         maker_price,
@@ -1371,7 +1380,7 @@ module sea::market {
 
                     event::emit_event<EventOrderPlace>(event_place, EventOrderPlace{
                         qty: n_qty,
-                        pair_id: pair.pair_id,
+                        pair_id: pair_id,
                         order_id: n_order_id,
                         price: nprice,
                         side: taker_side,
@@ -1387,6 +1396,7 @@ module sea::market {
             last_price = maker_price;
             trades = trades + 1;
             if (taker_complete) {
+                taker_completed = true;
                 break
             }
         };
@@ -1399,7 +1409,7 @@ module sea::market {
         coin::merge(&mut pair.quote_vault, quote_fee);
 
         // if order is match completed
-        taker_order.qty == 0
+        (taker_completed, total_filled)
     }
 
     fun get_grid_config(
@@ -1565,12 +1575,9 @@ module sea::market {
     // return: (taker_complete, maker_complete)
     fun swap_order<B, Q>(
         taker_side: u8, // taker side
-        taker_addr: address,
-        pair_id: u64,
         price_ratio: u64,
         fee_ratio: u64,
         maker_price: u64,
-        maker_order_id: u64,
         maker_addr: address,
         taker_order: &mut OrderEntity<B, Q>,
         maker_order: &mut OrderEntity<B, Q>,
@@ -1603,7 +1610,7 @@ module sea::market {
                 coin::merge(base_fee, to_plat);
             };
 
-            coin::deposit(taker_addr, to_taker);
+            coin::merge(&mut taker_order.base_frozen, to_taker);
             // maker got quote coin
             let quote = coin::extract<Q>(&mut taker_order.quote_frozen, quote_vol);
 
@@ -1623,7 +1630,7 @@ module sea::market {
                 let to_plat = coin::extract(&mut to_taker, fee_plat);
                 coin::merge(quote_fee, to_plat);
             };
-            coin::deposit(taker_addr, to_taker);
+            coin::merge(&mut taker_order.quote_frozen, to_taker);
 
             // maker got base coin
             let base = coin::extract<B>(&mut taker_order.base_frozen, match_qty);
@@ -1640,14 +1647,14 @@ module sea::market {
             taker_side: taker_side,
             qty: match_qty,
             quote_qty: quote_vol,
-            pair_id: pair_id,
+            pair_id: 0,
             price: maker_price,
             fee_total: fee_amt,
             fee_maker: fee_maker,
             fee_dao: fee_plat,
             taker_account_id: taker_order.account_id,
             maker_account_id: maker_order.account_id,
-            maker_order_id: maker_order_id,
+            maker_order_id: 0,
             timestamp: timestamp::now_seconds(),
         };
 
@@ -1824,6 +1831,7 @@ module sea::market {
 
         (0, asks, bids)
     }
+
     #[test_only]
     fun test_init_coins_and_accounts(
         sea_admin: &signer,
@@ -1873,14 +1881,6 @@ module sea::market {
         // escrow_frozen: u64,
     ) {
         assert!(coin::balance<CoinType>(addr) == balance, 100+idx);
-        // let avail = escrow::escrow_available<CoinType>(addr);
-        // debug::print(&avail);
-        // assert!(avail == escrow_avail, 200+idx);
-        // let freeze = escrow::escrow_frozen<CoinType>(addr);
-        // debug::print(&freeze);
-        // assert!(freeze == escrow_frozen, 300+idx);
-        // let sep = string::utf8(b"------------");
-        // debug::print(&sep);
     }
 
     #[test_only]
@@ -1890,6 +1890,77 @@ module sea::market {
         order_id: u64,
     ): u128 {
         generate_key(price, (pair_id << 40) | order_id)
+    }
+
+    #[test_only]
+    fun test_check_orders<B, Q>(
+        ask_steps: vector<PriceStep>,
+        bid_steps: vector<PriceStep>,
+    ) acquires Pair {
+        // use std::debug;
+        let (_, asks, bids) = test_get_pair_price_steps<B, Q>();
+
+        assert!(vector::length(&asks) == vector::length(&ask_steps), 1000);
+        assert!(vector::length(&bids) == vector::length(&bid_steps), 1001);
+        let i = 0;
+        while(i < vector::length(&asks)) {
+            let ask = vector::borrow(&asks, i);
+            let ask_step = vector::borrow(&ask_steps, i);
+
+            assert!(ask.qty == ask_step.qty, 2000+i);
+            assert!(ask.price == ask_step.price, 3000+i);
+            assert!(ask.orders == ask_step.orders, 4000+i);
+            i = i + 1;
+        };
+
+        i = 0;
+        while(i < vector::length(&bids)) {
+            let bid = vector::borrow(&bids, i);
+            let bid_step = vector::borrow(&bid_steps, i);
+
+            assert!(bid.qty == bid_step.qty, 5000+i);
+            assert!(bid.price == bid_step.price, 6000+i);
+            assert!(bid.orders == bid_step.orders, 7000+i);
+            i = i + 1;
+        };
+    }
+
+    #[test_only]
+    fun test_get_orderbook_keys<B, Q>(
+        tree: &RBTree<OrderEntity<B, Q>>
+    ): vector<u128> {
+        let keys = vector::empty<u128>();
+
+        if (!rbtree::is_empty(tree)) {
+            let (pos, key, _) = rbtree::get_leftmost_pos_key_val(tree);
+            // let price = price_from_key(key);
+            // let qty: u64 = item.qty;
+            // let orders: u64 = 1;
+            while (true) {
+                vector::push_back(&mut keys, key);
+                let (next_pos, next_key) = rbtree::get_next_pos_key(tree, pos);
+
+                if (next_key == 0) {
+                    // vector::push_back(&mut keys, next_key);
+                    break
+                };
+
+                key = next_key;
+                pos = next_pos;
+            }
+        };
+        keys
+    }
+
+    #[test_only]
+    fun test_get_pair_order_key<B, Q>(): vector<u128> acquires Pair {
+        let pair = borrow_global<Pair<B, Q>>(@sea_spot);
+        let ask_orders = test_get_orderbook_keys<B, Q>(&pair.asks);
+        let bid_orders = test_get_orderbook_keys<B, Q>(&pair.bids);
+
+        vector::append(&mut ask_orders, bid_orders);
+
+        ask_orders
     }
 
     // Tests ==================================================================
@@ -1919,10 +1990,9 @@ module sea::market {
         let sea_admin = test_prepare_account_env();
         test_init_coins_and_accounts(&sea_admin, user1, user2, user3);
         // 1. register quote
-        register_quote<T_USD>(&sea_admin, 10);
+        register_quote<T_USD>(&sea_admin, 10000);
         // 2. 
         register_pair<T_BTC, T_USD>(&sea_admin, 500, 1000000000, 10);
-        // debug::print(&address_of(sea_admin));     1000000000
 
         let pair = borrow_global_mut<Pair<T_BTC, T_USD>>(@sea_spot);
         pair.price_ratio
@@ -2127,6 +2197,8 @@ module sea::market {
         let vol2 = calc_quote_vol_for_buy(150130000000, 500000, price_ratio);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT+ vol1+vol2, 2007);
         // check taker user3 assets
+        // debug::print(&coin::balance<T_BTC>(address_of(user3)));
+        // debug::print(&(T_BTC_AMT+500000-fee2));
         test_check_account_asset<T_BTC>(address_of(user3), T_BTC_AMT+500000-fee2, 2008);
 
         let vol = calc_quote_vol_for_buy(150230000000, 10, price_ratio);
@@ -2524,4 +2596,774 @@ module sea::market {
         let ask4 = vector::borrow(&ask_orders, 4);
         assert!(ask4.qty == 1400000, 12);
     }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    #[expected_failure(abort_code = 0x113)]
+    fun test_place_invalid_order_qty(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 150120000000, 1000005, false, false);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    #[expected_failure(abort_code = 0x107)]
+    fun test_place_invalid_order_price(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 1501210000000, 1000000, false, false);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    #[expected_failure(abort_code = 0x114)]
+    fun test_place_invalid_order_min_notional(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 150120000000, 10, false, false);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_place_the_order_buy(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+        let account_id = escrow::get_or_register_account_id(address_of(user1));
+        let quote_qty = utils::calc_quote_qty(10000, 150120000000, 1000000000);
+        let order = new_order<T_BTC, T_USD>(user1, BUY, 10000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(BUY, 150120000000, order);
+
+        test_check_orders<T_BTC, T_USD>(vector[
+        ], vector[
+            // 5000000000 / 15012 = 333066.8798294698
+            PriceStep{qty: 10000, price: 150120000000, orders: 1},
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            // PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+
+        let order2 = new_order<T_BTC, T_USD>(user1, BUY, 34000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(BUY, 150120000000, order2);
+        test_check_orders<T_BTC, T_USD>(vector[
+        ], vector[
+            // 5000000000 / 15012 = 333066.8798294698
+            PriceStep{qty: 44000, price: 150120000000, orders: 2},
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            // PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_place_the_order_sell(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+        let account_id = escrow::get_or_register_account_id(address_of(user1));
+        let quote_qty = utils::calc_quote_qty(10000, 150120000000, 1000000000);
+        let order = new_order<T_BTC, T_USD>(user1, SELL, 10000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order);
+
+        test_check_orders<T_BTC, T_USD>(vector[
+            PriceStep{qty: 10000, price: 150120000000, orders: 1},
+        ], vector[
+            // 5000000000 / 15012 = 333066.8798294698
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            // PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+
+        let order2 = new_order<T_BTC, T_USD>(user1, SELL, 20000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order2);
+        test_check_orders<T_BTC, T_USD>(vector[
+            PriceStep{qty: 30000, price: 150120000000, orders: 2},
+        ], vector[
+            // 5000000000 / 15012 = 333066.8798294698
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            // PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+
+        let order3 = new_order<T_BTC, T_USD>(user1, SELL, 30000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order3);
+        test_check_orders<T_BTC, T_USD>(vector[
+            PriceStep{qty: 60000, price: 150120000000, orders: 3},
+        ], vector[
+            // 5000000000 / 15012 = 333066.8798294698
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            // PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+
+        let order4 = new_order<T_BTC, T_USD>(user1, SELL, 25000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order4);
+        test_check_orders<T_BTC, T_USD>(vector[
+            PriceStep{qty: 85000, price: 150120000000, orders: 4},
+        ], vector[
+            // 5000000000 / 15012 = 333066.8798294698
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            // PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    #[expected_failure]
+    fun test_place_the_order_buy_failed(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+        let account_id = escrow::get_or_register_account_id(address_of(user1));
+        let quote_qty = utils::calc_quote_qty(10000, 150120000000, 1000000000);
+        let order = new_order<T_BTC, T_USD>(user2, SELL, 10000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order);
+
+
+        let order = new_order<T_BTC, T_USD>(user1, BUY, 10000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(BUY, 150130000000, order);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    #[expected_failure]
+    fun test_place_the_order_sell_failed(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+        let account_id = escrow::get_or_register_account_id(address_of(user1));
+        let quote_qty = utils::calc_quote_qty(10000, 150120000000, 1000000000);
+        let order = new_order<T_BTC, T_USD>(user1, BUY, 10000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(BUY, 150130000000, order);
+
+        let order = new_order<T_BTC, T_USD>(user2, SELL, 10000, quote_qty,account_id, 0);
+        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order);
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+    // geometric grid orders
+    ////////////////////////////////////////////////////////////////////////////
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_buy_grid_geometric(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+        ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+
+        // place grid
+        place_grid_order<T_BTC, T_USD>(user1, 15013000000000, 0,
+            3, 0, 1500000, 10000, false, true);
+        test_check_orders<T_BTC, T_USD>(vector[], vector[
+            PriceStep{qty: 1500000, price: 15013000000000, orders: 1},
+            // 15013000000000 * 10 / 11 = 
+            PriceStep{qty: 1500000, price: 13648000000000, orders: 1},
+            // 13648000000000 * 10 / 11 = 
+            PriceStep{qty: 1500000, price: 12407000000000, orders: 1},
+        ]);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_buy_grid_geometric_quote(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+        ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+
+        // place grid
+        place_grid_order<T_BTC, T_USD>(user1, 15013000000000, 0,
+            3, 0, 5000000000, 10000, false, false);
+        test_check_orders<T_BTC, T_USD>(vector[], vector[
+            // 5000000000 / 15013000000000 = 333044
+            PriceStep{qty: 333040, price: 15013000000000, orders: 1},
+            // 5000000000 / 13648000000000 = 366354
+            PriceStep{qty: 366350, price: 13648000000000, orders: 1},
+            // 5000000000 / 12407000000000 = 402998
+            PriceStep{qty: 402990, price: 12407000000000, orders: 1},
+        ]);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_sell_grid_geometric(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+        ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+
+        // place grid
+        place_grid_order<T_BTC, T_USD>(user1, 0, 15013000000000,
+            0, 3, 1500000, 10000, false, true);
+        test_check_orders<T_BTC, T_USD>(vector[
+            PriceStep{qty: 1500000, price: 15013000000000, orders: 1},
+            // 15013000000000 * 11 / 10 = 16514300000000
+            PriceStep{qty: 1500000, price: 16514000000000, orders: 1},
+            // 16514000000000 * 10 / 11 = 18165400000000
+            PriceStep{qty: 1500000, price: 18165000000000, orders: 1},
+        ], vector[]);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_sell_grid_geometric_quote(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+        ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+
+        // place grid
+        place_grid_order<T_BTC, T_USD>(user1, 0, 15013000000000,
+            0, 3, 5000000000, 10000, false, false);
+        test_check_orders<T_BTC, T_USD>(vector[
+            PriceStep{qty: 333040, price: 15013000000000, orders: 1},
+            // 15013000000000 * 11 / 10 = 16514300000000
+            // 5000000000 / 16514 = 302773
+            PriceStep{qty: 302770, price: 16514000000000, orders: 1},
+            // 16514000000000 * 10 / 11 = 18165400000000
+            // 5000000000 / 18165 = 275254
+            PriceStep{qty: 275250, price: 18165000000000, orders: 1},
+        ], vector[]);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_buy_sell_grid_geometric(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+        ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        test_register_pair(user1, user2, user3);
+
+        // place grid
+        place_grid_order<T_BTC, T_USD>(user1, 15012000000000, 15013000000000,
+            2, 3, 5000000000, 10000, false, false);
+        test_check_orders<T_BTC, T_USD>(vector[
+            PriceStep{qty: 333040, price: 15013000000000, orders: 1},
+            // 15013000000000 * 11 / 10 = 16514300000000
+            // 5000000000 / 16514 = 302773
+            PriceStep{qty: 302770, price: 16514000000000, orders: 1},
+            // 16514000000000 * 10 / 11 = 18165400000000
+            // 5000000000 / 18165 = 275254
+            PriceStep{qty: 275250, price: 18165000000000, orders: 1},
+        ], vector[
+            // 5000000000 / 15012 = 333066.8798294698
+            PriceStep{qty: 333060, price: 15012000000000, orders: 1},
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+    }
+
+    // geometric, quote equal grids
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_flip_grid_geometric_quote_equal(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+        ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        // use std::debug;
+        test_register_pair(user1, user2, user3);
+
+        // place grid
+        place_grid_order<T_BTC, T_USD>(user1, 15012000000000, 15013000000000,
+            2, 3, 5000000000, 10000, false, false);
+
+        let btc_pair = borrow_global<Pair<T_BTC, T_USD>>(@sea_spot);
+        let btc_price_ratio = btc_pair.price_ratio;
+        let btc_fee_ratio = btc_pair.fee_ratio;
+
+        // user2 buy first sell order
+        let addr2 = address_of(user2);
+        let account2_id = escrow::get_or_register_account_id(addr2);
+        let (_, _, order_buy1) = match_order<T_BTC, T_USD>(
+            addr2,
+            BUY,
+            15015000000000,
+            new_order<T_BTC, T_USD>(user2, BUY, 400000,
+            utils::calc_quote_qty(400000, 15015000000000, btc_price_ratio),
+            account2_id,
+            0));
+
+        let fee_deno = fee::get_fee_denominate();
+        let fee1 = 333040 * (btc_fee_ratio) / fee_deno;
+        let net_buy1 = 333040 - fee1;
+        let quote_usd1 = 333040 * 15013;
+        assert!(coin::value(&order_buy1.base_frozen) == net_buy1, 2900);
+        destroy_order(addr2, order_buy1);
+
+        assert!(coin::balance<T_BTC>(addr2) == T_BTC_AMT+net_buy1, 2901);
+        assert!(coin::balance<T_USD>(addr2) == T_USD_AMT-quote_usd1, 2902);
+
+        // the sell1 order has flipped to bid
+        test_check_orders<T_BTC, T_USD>(vector[
+            // 15013000000000 * 11 / 10 = 16514300000000
+            // 5000000000 / 16514 = 302773
+            PriceStep{qty: 302770, price: 16514000000000, orders: 1},
+            // 16514000000000 * 10 / 11 = 18165400000000
+            // 5000000000 / 18165 = 275254
+            PriceStep{qty: 275250, price: 18165000000000, orders: 1},
+        ], vector[
+            // 5000000000 / 15012 = 333066.8798294698
+            PriceStep{qty: 333060, price: 15012000000000, orders: 1},
+            // 15013000000000 * 10 / 11 = 13648181818181
+            // 333040 * 15013000000000 / 13648000000000 = 366348.88042203983
+            PriceStep{qty: 366340, price: 13648000000000, orders: 1},
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+
+        // user3 buy left two sell orders
+        let addr3 = address_of(user3);
+        let account3_id = escrow::get_or_register_account_id(addr3);
+        let (_, _, order_buy2) = match_order<T_BTC, T_USD>(
+            addr3,
+            BUY,
+            18265000000000,
+            new_order<T_BTC, T_USD>(user3, BUY, 800000,
+            utils::calc_quote_qty(800000, 18265000000000, btc_price_ratio),
+            account3_id,
+            0));
+
+        // 302770 * 16514000000000 
+        // 275250 * 18165000000000
+        let fee21 = 302770 * (btc_fee_ratio) / fee_deno;
+        let fee22 = 275250 * (btc_fee_ratio) / fee_deno;
+        let net_buy2 = 302770 - fee21 + 275250 - fee22;
+        let quote_usd2 = 302770 * 16514 + 275250 * 18165;
+        assert!(coin::value(&order_buy2.base_frozen) == net_buy2, 3900);
+        destroy_order(addr3, order_buy2);
+
+        assert!(coin::balance<T_BTC>(addr3) == T_BTC_AMT+net_buy2, 3901);
+        assert!(coin::balance<T_USD>(addr3) == T_USD_AMT-quote_usd2, 3902);
+
+        // all grid buy orders
+        test_check_orders<T_BTC, T_USD>(vector[
+            // 15013000000000 * 11 / 10 = 16514300000000
+            // 5000000000 / 16514 = 302773
+        ], vector[
+            // 18165000000000 * 10 / 11 = 16513636363636.363
+            // 18165000000000 * 275250 / 16514000000000 = 302768.3329296355
+            PriceStep{qty: 302760, price: 16514000000000, orders: 1},
+            // 
+            // 16514000000000 * 10 / 11 = 15012727272727.273
+            // 16514000000000 * 302770 / 15013000000000 = 333040.949843469
+            PriceStep{qty: 333040, price: 15013000000000, orders: 1},
+
+            // 5000000000 / 15012 = 333066.8798294698
+            PriceStep{qty: 333060, price: 15012000000000, orders: 1},
+            // 15013000000000 * 10 / 11 = 13648181818181
+            // 333040 * 15013000000000 / 13648000000000 = 366348.88042203983
+            PriceStep{qty: 366340, price: 13648000000000, orders: 1},
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+
+        // user2 fill buy orders
+        let (_, _, order_sell1) = match_order<T_BTC, T_USD>(
+            addr2,
+            SELL,
+            15013000000000,
+            new_order<T_BTC, T_USD>(user2, SELL, 400000,
+            0,
+            account2_id,
+            0));
+        destroy_order(addr2, order_sell1);
+        let user2_btc_balance = coin::balance<T_BTC>(addr2);
+        assert!(user2_btc_balance == T_BTC_AMT+net_buy1-400000, 4901);
+        let sell1_quote = (302760 * 16514 + (400000-302760) * 15013);
+        let sell1_fee = sell1_quote * (btc_fee_ratio) / fee_deno; // usd
+        let net_sell1 = sell1_quote - sell1_fee;
+        let user2_usd_balance = coin::balance<T_USD>(addr2);
+        assert!(user2_usd_balance == T_USD_AMT-quote_usd1+net_sell1, 4902);
+        // all grid buy orders
+        test_check_orders<T_BTC, T_USD>(vector[
+            // 15013000000000 * 11 / 10 = 16514300000000
+            // 5000000000 / 16514 = 302773
+            // 16514000000000 * 11 * 10 = 1816540000000000
+            //
+            PriceStep{qty: 302760, price: 18165000000000, orders: 1},
+        ], vector[
+            // 18165000000000 * 10 / 11 = 16513636363636.363
+            // 18165000000000 * 275250 / 16514000000000 = 302768.3329296355
+            // 
+            // 16514000000000 * 10 / 11 = 15012727272727.273
+            // 16514000000000 * 302770 / 15013000000000 = 333040.949843469
+            // 333040 - (400000 - 302760) = 235800
+            PriceStep{qty: 235800, price: 15013000000000, orders: 1},
+
+            // 5000000000 / 15012 = 333066.8798294698
+            PriceStep{qty: 333060, price: 15012000000000, orders: 1},
+            // 15013000000000 * 10 / 11 = 13648181818181
+            // 333040 * 15013000000000 / 13648000000000 = 366348.88042203983
+            PriceStep{qty: 366340, price: 13648000000000, orders: 1},
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+        ]);
+
+        // user3 fill buy orders
+        let (_, _, order_sell2) = match_order<T_BTC, T_USD>(
+            addr3,
+            SELL,
+            15012000000000,
+            new_order<T_BTC, T_USD>(user3, SELL, 400000,
+            0,
+            account3_id,
+            0));
+        destroy_order(addr3, order_sell2);
+        let user3_btc_balance = coin::balance<T_BTC>(addr3);
+        assert!(user3_btc_balance == T_BTC_AMT+net_buy2-400000, 5901);
+        let sell2_quote = (235800 * 15013 + (400000 - 235800) * 15012);
+        let sell2_fee = sell2_quote * (btc_fee_ratio) / fee_deno;
+        let net_sell2 = sell2_quote - sell2_fee;
+        let user3_usd_balance = coin::balance<T_USD>(addr3);
+        assert!(user3_usd_balance == T_USD_AMT-quote_usd2+net_sell2, 5902);
+        test_check_orders<T_BTC, T_USD>(vector[
+                    // 18165000000000 * 10 / 11 = 16513636363636.363
+                    // 18165000000000 * 275250 / 16514000000000 = 302768.3329296355
+                    // 
+                    // 16514000000000 * 10 / 11 = 15012727272727.273
+                    // 16514000000000 * 302770 / 15013000000000 = 333040.949843469
+                    // 333040 - (400000 - 302760) = 235800
+                    // 15013000000000 * 11 * 10 = 1651430000000000
+                    PriceStep{qty: 333040, price: 16514000000000, orders: 1},
+                    // 15013000000000 * 11 / 10 = 16514300000000
+                    // 5000000000 / 16514 = 302773
+                    // 16514000000000 * 11 * 10 = 1816540000000000
+                    //
+                    PriceStep{qty: 302760, price: 18165000000000, orders: 1},
+                ], vector[
+                    // 5000000000 / 15012 = 333066.8798294698
+                    // 333060 - (400000 - 235800)
+                    PriceStep{qty: 168860, price: 15012000000000, orders: 1},
+                    // 15013000000000 * 10 / 11 = 13648181818181
+                    // 333040 * 15013000000000 / 13648000000000 = 366348.88042203983
+                    PriceStep{qty: 366340, price: 13648000000000, orders: 1},
+                    // 15012000000000 * 10 / 11 = 13647272727272.727
+                    // 5000000000 / 13647 = 302773
+                    PriceStep{qty: 366380, price: 13647000000000, orders: 1},
+                ]);
+
+        // user1 cancel all grid orders
+        let grid_orders = test_get_pair_order_key<T_BTC, T_USD>();
+        assert!(vector::length(&grid_orders) == 5, 5);
+        cancel_batch_orders<T_BTC, T_USD>(user1, vector<u8>[SELL, SELL, BUY, BUY, BUY], grid_orders);
+
+        // user1 balance
+        // pair fee
+        // let quote_vault = &btc_pair.quote_vault;
+        // let base_vault = &btc_pair.base_vault;
+        let (usd_grid_fee1, usd_plat_fee1) = fee::get_maker_fee_shares(sell1_fee, true);
+        let (usd_grid_fee2, usd_plat_fee2) = fee::get_maker_fee_shares(sell2_fee, true);
+        let (btc_grid_fee1, btc_plat_fee1) = fee::get_maker_fee_shares(fee1, true);
+        let (btc_grid_fee2, btc_plat_fee2) = fee::get_maker_fee_shares(fee21 + fee22, true);
+
+        usd_grid_fee1;
+        usd_grid_fee2;
+        btc_grid_fee1;
+        btc_grid_fee2;
+        let usd_plat_fee = usd_plat_fee1 + usd_plat_fee2 + 1; // maker fee truncated 1
+        let btc_plat_fee = btc_plat_fee1 + btc_plat_fee2 + 1; // maker fee truncated 1
+        let user1_btc_balance = coin::balance<T_BTC>(address_of(user1));
+        assert!(user1_btc_balance == T_BTC_AMT * 3 - user3_btc_balance - user2_btc_balance - btc_plat_fee, 7);
+        let user1_usd_balance = coin::balance<T_USD>(address_of(user1));
+        assert!(user1_usd_balance == T_USD_AMT * 3 - user3_usd_balance - user2_usd_balance - usd_plat_fee, 8);
+        // assert!(coin::value<T_USD>(quote_vault) == usd_plat_fee, 8);
+        // let btc_fee = fee1 + fee21 + fee22;
+    }
+
+    // geometric, quote equal grids
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_flip_grid_geometric_base_equal(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+        ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        // use std::debug;
+        test_register_pair(user1, user2, user3);
+
+        // place grid
+        // base equal
+        place_grid_order<T_BTC, T_USD>(user1, 15012000000000, 15013000000000,
+            2, 3, 350000, 10000, false, true);
+
+        let btc_pair = borrow_global<Pair<T_BTC, T_USD>>(@sea_spot);
+        let btc_price_ratio = btc_pair.price_ratio;
+        let btc_fee_ratio = btc_pair.fee_ratio;
+
+        // user2 buy first sell order
+        let addr2 = address_of(user2);
+        let account2_id = escrow::get_or_register_account_id(addr2);
+        let (_, _, order_buy1) = match_order<T_BTC, T_USD>(
+            addr2,
+            BUY,
+            15015000000000,
+            new_order<T_BTC, T_USD>(user2, BUY, 400000,
+            utils::calc_quote_qty(400000, 15015000000000, btc_price_ratio),
+            account2_id,
+            0));
+
+        let fee_deno = fee::get_fee_denominate();
+        let fee1 = 350000 * (btc_fee_ratio) / fee_deno;
+        let net_buy1 = 350000 - fee1;
+        let quote_usd1 = 350000 * 15013;
+        assert!(coin::value(&order_buy1.base_frozen) == net_buy1, 2900);
+        destroy_order(addr2, order_buy1);
+
+        assert!(coin::balance<T_BTC>(addr2) == T_BTC_AMT+net_buy1, 2901);
+        assert!(coin::balance<T_USD>(addr2) == T_USD_AMT-quote_usd1, 2902);
+
+        // the sell1 order has flipped to bid
+        test_check_orders<T_BTC, T_USD>(vector[
+            // 15013000000000 * 11 / 10 = 16514300000000
+            // 5000000000 / 16514 = 302773
+            PriceStep{qty: 350000, price: 16514000000000, orders: 1},
+            // 16514000000000 * 10 / 11 = 18165400000000
+            // 5000000000 / 18165 = 275254
+            PriceStep{qty: 350000, price: 18165000000000, orders: 1},
+        ], vector[
+            // 5000000000 / 15012 = 333066.8798294698
+            PriceStep{qty: 350000, price: 15012000000000, orders: 1},
+            // 15013000000000 * 10 / 11 = 13648181818181
+            // 350000 * 15013000000000 / 13648000000000 = 385005.12895662367
+            PriceStep{qty: 385000, price: 13648000000000, orders: 1},
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            PriceStep{qty: 350000, price: 13647000000000, orders: 1},
+        ]);
+
+        // user3 buy left two sell orders
+        let addr3 = address_of(user3);
+        let account3_id = escrow::get_or_register_account_id(addr3);
+        let (_, _, order_buy2) = match_order<T_BTC, T_USD>(
+            addr3,
+            BUY,
+            18265000000000,
+            new_order<T_BTC, T_USD>(user3, BUY, 800000,
+            utils::calc_quote_qty(800000, 18265000000000, btc_price_ratio),
+            account3_id,
+            0));
+
+        // 350000 * 16514000000000 
+        // 350000 * 18165000000000
+        let fee21 = 350000 * (btc_fee_ratio) / fee_deno;
+        let fee22 = 350000 * (btc_fee_ratio) / fee_deno;
+        let net_buy2 = 350000 - fee21 + 350000 - fee22;
+        let quote_usd2 = 350000 * 16514 + 350000 * 18165;
+        assert!(coin::value(&order_buy2.base_frozen) == net_buy2, 3900);
+        destroy_order(addr3, order_buy2);
+
+        assert!(coin::balance<T_BTC>(addr3) == T_BTC_AMT+net_buy2, 3901);
+        assert!(coin::balance<T_USD>(addr3) == T_USD_AMT-quote_usd2, 3902);
+
+        // all grid buy orders
+        test_check_orders<T_BTC, T_USD>(vector[
+            // 15013000000000 * 11 / 10 = 16514300000000
+            // 5000000000 / 16514 = 302773
+        ], vector[
+            // 18165000000000 * 10 / 11 = 16513636363636.363
+            // 18165000000000 * 350000 / 16514000000000 = 384991.52234467724
+            PriceStep{qty: 384990, price: 16514000000000, orders: 1},
+            // 
+            // 16514000000000 * 10 / 11 = 15012727272727.273
+            // 16514000000000 * 350000 / 15013000000000 = 384993.00606141344
+            PriceStep{qty: 384990, price: 15013000000000, orders: 1},
+
+            // 5000000000 / 15012 = 333066.8798294698
+            PriceStep{qty: 350000, price: 15012000000000, orders: 1},
+            // 15013000000000 * 10 / 11 = 13648181818181
+            // 333040 * 15013000000000 / 13648000000000 = 366348.88042203983
+            PriceStep{qty: 385000, price: 13648000000000, orders: 1},
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            PriceStep{qty: 350000, price: 13647000000000, orders: 1},
+        ]);
+
+        // user2 fill buy orders
+        let (_, _, order_sell1) = match_order<T_BTC, T_USD>(
+            addr2,
+            SELL,
+            15013000000000,
+            new_order<T_BTC, T_USD>(user2, SELL, 400000,
+            0,
+            account2_id,
+            0));
+        destroy_order(addr2, order_sell1);
+        let user2_btc_balance = coin::balance<T_BTC>(addr2);
+        assert!(user2_btc_balance == T_BTC_AMT+net_buy1-400000, 4901);
+        let sell1_quote = (384990 * 16514 + (400000-384990) * 15013);
+        let sell1_fee = sell1_quote * (btc_fee_ratio) / fee_deno; // usd
+        let net_sell1 = sell1_quote - sell1_fee;
+        let user2_usd_balance = coin::balance<T_USD>(addr2);
+        assert!(user2_usd_balance == T_USD_AMT-quote_usd1+net_sell1, 4902);
+        // all grid buy orders
+        test_check_orders<T_BTC, T_USD>(vector[
+            // 15013000000000 * 11 / 10 = 16514300000000
+            // 5000000000 / 16514 = 302773
+            // 16514000000000 * 11 * 10 = 1816540000000000
+            //
+            PriceStep{qty: 384990, price: 18165000000000, orders: 1},
+        ], vector[
+            // 18165000000000 * 10 / 11 = 16513636363636.363
+            // 18165000000000 * 275250 / 16514000000000 = 302768.3329296355
+            // 
+            // 16514000000000 * 10 / 11 = 15012727272727.273
+            // 16514000000000 * 302770 / 15013000000000 = 333040.949843469
+            // 384990 - (400000-384990) = 369980
+            PriceStep{qty: 369980, price: 15013000000000, orders: 1},
+
+            // 5000000000 / 15012 = 333066.8798294698
+            PriceStep{qty: 350000, price: 15012000000000, orders: 1},
+            // 15013000000000 * 10 / 11 = 13648181818181
+            // 333040 * 15013000000000 / 13648000000000 = 366348.88042203983
+            PriceStep{qty: 385000, price: 13648000000000, orders: 1},
+            // 15012000000000 * 10 / 11 = 13647272727272.727
+            // 5000000000 / 13647 = 302773
+            PriceStep{qty: 350000, price: 13647000000000, orders: 1},
+        ]);
+
+        // user3 fill buy orders
+        let (_, _, order_sell2) = match_order<T_BTC, T_USD>(
+            addr3,
+            SELL,
+            15012000000000,
+            new_order<T_BTC, T_USD>(user3, SELL, 400000,
+            0,
+            account3_id,
+            0));
+        destroy_order(addr3, order_sell2);
+        let user3_btc_balance = coin::balance<T_BTC>(addr3);
+        assert!(user3_btc_balance == T_BTC_AMT+net_buy2-400000, 5901);
+        let sell2_quote = (369980 * 15013 + (400000 - 369980) * 15012);
+        let sell2_fee = sell2_quote * (btc_fee_ratio) / fee_deno;
+        let net_sell2 = sell2_quote - sell2_fee;
+        let user3_usd_balance = coin::balance<T_USD>(addr3);
+        assert!(user3_usd_balance == T_USD_AMT-quote_usd2+net_sell2, 5902);
+        test_check_orders<T_BTC, T_USD>(vector[
+                    // 18165000000000 * 10 / 11 = 16513636363636.363
+                    // 18165000000000 * 275250 / 16514000000000 = 302768.3329296355
+                    // 
+                    // 16514000000000 * 10 / 11 = 15012727272727.273
+                    // 16514000000000 * 302770 / 15013000000000 = 333040.949843469
+                    // 333040 - (400000 - 302760) = 235800
+                    // 15013000000000 * 11 * 10 = 1651430000000000
+                    PriceStep{qty: 384990, price: 16514000000000, orders: 1},
+                    // 15013000000000 * 11 / 10 = 16514300000000
+                    // 5000000000 / 16514 = 302773
+                    // 16514000000000 * 11 * 10 = 1816540000000000
+                    //
+                    PriceStep{qty: 384990, price: 18165000000000, orders: 1},
+                ], vector[
+                    // 5000000000 / 15012 = 333066.8798294698
+                    // 350000 - (400000 - 369980)
+                    PriceStep{qty: 319980, price: 15012000000000, orders: 1},
+                    // 15013000000000 * 10 / 11 = 13648181818181
+                    // 333040 * 15013000000000 / 13648000000000 = 366348.88042203983
+                    PriceStep{qty: 385000, price: 13648000000000, orders: 1},
+                    // 15012000000000 * 10 / 11 = 13647272727272.727
+                    // 5000000000 / 13647 = 302773
+                    PriceStep{qty: 350000, price: 13647000000000, orders: 1},
+                ]);
+
+        // user1 cancel all grid orders
+        let grid_orders = test_get_pair_order_key<T_BTC, T_USD>();
+        assert!(vector::length(&grid_orders) == 5, 5);
+        cancel_batch_orders<T_BTC, T_USD>(user1, vector<u8>[SELL, SELL, BUY, BUY, BUY], grid_orders);
+
+        // user1 balance
+        // pair fee
+        // let quote_vault = &btc_pair.quote_vault;
+        // let base_vault = &btc_pair.base_vault;
+        let (usd_grid_fee1, usd_plat_fee1) = fee::get_maker_fee_shares(sell1_fee, true);
+        let (usd_grid_fee2, usd_plat_fee2) = fee::get_maker_fee_shares(sell2_fee, true);
+        let (btc_grid_fee1, btc_plat_fee1) = fee::get_maker_fee_shares(fee1, true);
+        let (btc_grid_fee2, btc_plat_fee2) = fee::get_maker_fee_shares(fee21 + fee22, true);
+
+        usd_grid_fee1;
+        usd_grid_fee2;
+        btc_grid_fee1;
+        btc_grid_fee2;
+        let usd_plat_fee = usd_plat_fee1 + usd_plat_fee2 + 1; // maker fee truncated 1
+        let btc_plat_fee = btc_plat_fee1 + btc_plat_fee2; // maker fee truncated 1
+        let user1_btc_balance = coin::balance<T_BTC>(address_of(user1));
+        assert!(user1_btc_balance == T_BTC_AMT * 3 - user3_btc_balance - user2_btc_balance - btc_plat_fee, 7);
+        let user1_usd_balance = coin::balance<T_USD>(address_of(user1));
+        assert!(user1_usd_balance == T_USD_AMT * 3 - user3_usd_balance - user2_usd_balance - usd_plat_fee, 8);
+        // assert!(coin::value<T_USD>(quote_vault) == usd_plat_fee, 8);
+        // let btc_fee = fee1 + fee21 + fee22;
+    }
+
 }

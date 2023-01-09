@@ -73,6 +73,7 @@ module sea::fee {
 
     // maker fee shares
     // ratio is maker's proportion
+    // return: (maker return fee, platform fee)
     public fun get_maker_fee_shares(
         fee: u64,
         is_grid: bool

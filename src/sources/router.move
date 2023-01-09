@@ -54,7 +54,7 @@ module sea::router {
 
         if (ob_base_qty > 0) {
             let order = market::new_order<B, Q>(account, side, ob_base_qty, ob_vol, 0, 0);
-            let order_left = market::match_order(addr, side, ob_price, order);
+            let (_, _, order_left) = market::match_order(addr, side, ob_price, order);
             let (order_base, order_quote) = market::extract_order(order_left);
             coin::merge(&mut base_out, order_base);
             coin::merge(&mut quote_out, order_quote);

@@ -30,7 +30,7 @@ module sea::utils {
         }
     }
         
-    // quote_qty = qty * price
+    // quote_qty = qty * price / price_ratio
     public fun calc_quote_qty(
         qty: u64,
         price: u64,
@@ -39,6 +39,7 @@ module sea::utils {
         (((qty as u128) * (price as u128)/(price_ratio as u128)) as u64)
     }
 
+    // base_qty = quote_qty * price_ratio / price
     public fun calc_base_qty(
         quote_qty: u64,
         price: u64,

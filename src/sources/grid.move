@@ -15,7 +15,7 @@ module sea::grid {
 
     const BUY:                    u8 = 1;
     const SELL:                   u8 = 2;
-    const PRICE_DENOMINATE_64:    u64 = 100000;
+    const PRICE_DENOMINATE_64:    u64  = 100000;
     const PRICE_DENOMINATE_128:   u128 = 100000;
     // arithmetic: price_diff = (grid_upper_limit - grid_lower_limit) / grid_count
 
