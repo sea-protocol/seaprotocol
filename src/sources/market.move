@@ -428,8 +428,19 @@ module sea::market {
         side: u8,
         price: u64,
         qty: u64,
+        quote_qty: u64,
     ) acquires Pair {
-        place_postonly_order_return_id<B, Q>(account, side, price, qty);
+        let account_addr = address_of(account);
+        let order = new_order<B, Q>(
+            account,
+            side,
+            qty,
+            quote_qty,
+            escrow::get_or_register_account_id(account_addr),
+            0,
+        );
+        // place_postonly_order_return_id<B, Q>(account, side, price, qty);
+        do_place_postonly_order<B, Q>(side, price, order);
     }
 
     public entry fun place_limit_order<B, Q>(
@@ -437,33 +448,62 @@ module sea::market {
         side: u8,
         price: u64,
         qty: u64,
+        quote_qty: u64,
         ioc: bool,
         fok: bool,
     ) acquires Pair, AccountGrids {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+        assert!(!pair.paused, E_PAIR_PAUSED);
         if (fok) {
             // check this order can be filled
             assert!(fok_fill_complete<B, Q>(pair, side, price, qty), E_FOK_NOT_COMPLETE);
         };
         let taker_addr = address_of(account);
-        let opts = &PlaceOrderOpts {
-            addr: taker_addr,
-            side: side,
-            post_only: false,
-            ioc: ioc,
-            fok: fok,
-            // is_market: false,
-        };
         let order = new_order<B, Q>(
             account,
             side,
             qty,
-            utils::calc_quote_qty(qty, price, pair.price_ratio),
+            quote_qty,
             escrow::get_or_register_account_id(taker_addr),
             0,
         );
 
-        match<B, Q>(account, pair, price, opts, order);
+        let (completed, base_filled, order_left) = do_match<B, Q>(pair, taker_addr, side, price, order, false);
+        if ((!completed) && (!ioc)) {
+            // make sure order qty >= lot_size
+            // place order to orderbook
+            place_part_filled_order(side, taker_addr, pair, price, base_filled, order_left)
+        } else {
+            destroy_order(taker_addr, order_left);
+
+            0
+        };
+    }
+
+    public entry fun market_buy<B, Q>(
+        account: &signer,
+        quote_qty: u64,
+    ) acquires Pair, AccountGrids {
+        // let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+        let addr = address_of(account);
+        let account_id = escrow::get_or_register_account_id(addr);
+        let order = build_order<B, Q>(account_id, 0, 0, coin::zero(), coin::withdraw<Q>(account, quote_qty));
+
+        let (_, _, order_left) = match_order(addr, BUY, 0, order, true);
+        destroy_order(address_of(account), order_left);
+    }
+
+    public entry fun market_sell<B, Q>(
+        account: &signer,
+        base_qty: u64,
+    ) acquires Pair, AccountGrids {
+        // let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+        let addr = address_of(account);
+        let account_id = escrow::get_or_register_account_id(addr);
+        let order = build_order<B, Q>(account_id, 0, base_qty, coin::withdraw<B>(account, base_qty), coin::zero());
+
+        let (_, _, order_left) = match_order(addr, SELL, 0, order, true);
+        destroy_order(address_of(account), order_left);
     }
 
     /*
@@ -807,35 +847,10 @@ module sea::market {
         side: u8,
         price: u64,
         qty: u64,
+        quote_qty: u64
     ): u128 acquires Pair {
         let account_addr = address_of(account);
-        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
-
-        assert!(!pair.paused, E_PAIR_PAUSED);
-        validate_order_qty_price(pair, qty, price);
-
-        if (side == SELL)  {
-            let bids = &mut pair.bids;
-            if (!rbtree::is_empty(bids)) {
-                let bid0 = get_best_price(bids);
-                assert!(price >= bid0, E_PRICE_TOO_LOW);
-            }
-        } else {
-            let asks = &mut pair.asks;
-            if (!rbtree::is_empty(asks)) {
-                let ask0 = get_best_price(asks);
-                assert!(price <= ask0, E_PRICE_TOO_HIGH);
-            }
-        };
-        // let order = OrderEntity{
-        //     qty: qty,
-        //     grid_id: 0,
-        //     account_id: escrow::get_or_register_account_id(account_addr),
-        //     base_frozen: coin::zero(),
-        //     quote_frozen: coin::zero(),
-        // };
-        let quote_qty = utils::calc_quote_qty(qty, price, pair.price_ratio);
-        let order = new_order(
+        let order = new_order<B, Q>(
             account,
             side,
             qty,
@@ -843,30 +858,27 @@ module sea::market {
             escrow::get_or_register_account_id(account_addr),
             0,
         );
-        pair.last_timestamp = timestamp::now_seconds();
-        return place_order(side, price, pair, order)
+        return do_place_postonly_order<B, Q>(side, price, order)
     }
 
     // the caller should extract the left order after matching
+    // return: completed, base filled qty, order
     public fun match_order<B, Q>(
         taker_addr: address,
         side: u8,
         price: u64,
         order: OrderEntity<B, Q>,
+        is_market: bool
     ): (bool, u64, OrderEntity<B, Q>) acquires Pair, AccountGrids {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         assert!(!pair.paused, E_PAIR_PAUSED);
-        validate_order(pair, side, price, &order);
 
-        let (completed, filled) = match_internal(taker_addr, side, price, pair, &mut order);
-        pair.last_timestamp = timestamp::now_seconds();
-
-        (completed, filled, order)
+        do_match(pair, taker_addr, side, price, order, is_market)
     }
 
     // just place order, same as postonly.
     // for other module call
-    public fun place_the_order<B, Q>(
+    public fun do_place_postonly_order<B, Q>(
         side: u8,
         price: u64,
         order: OrderEntity<B, Q>,
@@ -899,6 +911,7 @@ module sea::market {
             assert!(utils::calc_quote_qty(qty, price, pair.price_ratio) == quote_qty, E_INVALID_QTY);
         };
         validate_order_qty_price(pair, qty, price);
+        pair.last_timestamp = timestamp::now_seconds();
 
         place_order(side, price, pair, order)
     }
@@ -1013,7 +1026,7 @@ module sea::market {
         orders
     }
 
-    fun validate_order<B, Q>(
+    fun validate_limit_order<B, Q>(
         pair: &Pair<B, Q>,
         side: u8,
         price: u64,
@@ -1030,6 +1043,20 @@ module sea::market {
         validate_order_qty_price(pair, qty, price);
     }
 
+    fun validate_market_order<B, Q>(
+        pair: &Pair<B, Q>,
+        side: u8,
+        order: &OrderEntity<B, Q>
+    ) {
+        let qty = order.qty;
+        if (side == SELL) {
+            assert!(coin::value(&order.base_frozen) == qty, E_BASE_NOT_ENOUGH);
+            assert!(filter_lot_size(qty, pair.lot_size), E_LOT_SIZE);
+        } else {
+            assert!(coin::value(&order.quote_frozen) >= pair.min_notional, E_MIN_NOTIONAL);
+        }
+    }
+
     // validate order qty, price, min_notional
     fun validate_order_qty_price<B, Q>(
         pair: &Pair<B, Q>,
@@ -1043,7 +1070,7 @@ module sea::market {
     }
 
     fun filter_lot_size(qty: u64, lot_size: u64): bool {
-        (qty / lot_size) * lot_size == qty
+        qty >= lot_size && (qty / lot_size) * lot_size == qty
     }
 
     fun valid_lot_size(lot_size: u64) {
@@ -1166,57 +1193,94 @@ module sea::market {
         (((key >> 64) as u64), ((key & ORDER_ID_MASK_U128) as u64))
     }
 
+    fun do_match<B, Q>(
+        pair: &mut Pair<B, Q>,
+        taker_addr: address,
+        side: u8,
+        price: u64,
+        order: OrderEntity<B, Q>,
+        is_market: bool
+    ): (bool, u64, OrderEntity<B, Q>) acquires AccountGrids {
+        if (is_market) {
+            validate_market_order(pair, side, &order);
+        } else {
+            validate_limit_order(pair, side, price, &order);
+        };
+
+        let (completed, filled) = match_internal(taker_addr, side, is_market, price, pair, &mut order);
+        pair.last_timestamp = timestamp::now_seconds();
+
+        (completed, filled, order)
+    }
+
+    /*
     /// match buy order, taker is buyer, maker is seller
     /// 
     fun match<B, Q>(
-        taker: &signer,
+        side: u8,
+        is_ioc: bool,
+        is_market: bool,
+        taker_addr: address,
         pair: &mut Pair<B, Q>,
         price: u64,
-        opts: &PlaceOrderOpts,
         taker_order: OrderEntity<B, Q>
     ): u128 acquires AccountGrids {
-        let taker_addr = address_of(taker);
+        // let taker_addr = address_of(taker);
 
         assert!(!pair.paused, E_PAIR_PAUSED);
-        validate_order(pair, opts.side, price, &taker_order);
+        validate_limit_order(pair, side, price, &taker_order);
 
         let (completed, base_filled) = match_internal(
             taker_addr,
-            opts.side,
+            side,
+            false,
             price,
             pair,
             &mut taker_order,
         );
 
         pair.last_timestamp = timestamp::now_seconds();
-        if ((!completed) && (!opts.ioc)) {
+        if ((!completed) && (!is_ioc)) {
             // make sure order qty >= lot_size
             // place order to orderbook
-            if (pair.lot_size > 0 && taker_order.qty >= pair.lot_size) {
-                let nqty = taker_order.qty / pair.lot_size * pair.lot_size;
-                if (opts.side == BUY) {
-                    //
-                    let nquote_qty = utils::calc_quote_qty(nqty, price, pair.price_ratio);
-                    let quote_left = coin::value(&taker_order.quote_frozen) - nquote_qty;
-                    if (quote_left > 0) {
-                        coin::deposit(taker_addr, coin::extract(&mut taker_order.quote_frozen, quote_left));
-                    };
-                    if (base_filled > 0) {
-                        // coin::value(&taker_order.base_frozen) + fee = base_filled
-                        coin::deposit(taker_addr, coin::extract_all(&mut taker_order.base_frozen));
-                    }
-                } else {
-                    let base_left = taker_order.qty-nqty;
-                    if (base_left > 0) {
-                        coin::deposit(taker_addr, coin::extract(&mut taker_order.base_frozen, base_left));
-                    }
-                };
-                place_order(opts.side, price, pair, taker_order)
-            } else {
-                destroy_order(taker_addr, taker_order);
+            place_part_filled_order(side, taker_addr, pair, price, base_filled, taker_order)
+        } else {
+            destroy_order(taker_addr, taker_order);
 
-                0
-            }
+            0
+        }
+    }
+    */
+
+    // place order after matched/filled part
+    fun place_part_filled_order<B, Q>(
+        side: u8,
+        taker_addr: address,
+        pair: &mut Pair<B, Q>,
+        price: u64,
+        base_filled: u64,
+        taker_order: OrderEntity<B, Q>
+    ): u128 {
+        if (pair.lot_size > 0 && taker_order.qty >= pair.lot_size) {
+            let nqty = taker_order.qty / pair.lot_size * pair.lot_size;
+            if (side == BUY) {
+                //
+                let nquote_qty = utils::calc_quote_qty(nqty, price, pair.price_ratio);
+                let quote_left = coin::value(&taker_order.quote_frozen) - nquote_qty;
+                if (quote_left > 0) {
+                    coin::deposit(taker_addr, coin::extract(&mut taker_order.quote_frozen, quote_left));
+                };
+                if (base_filled > 0) {
+                    // coin::value(&taker_order.base_frozen) + fee = base_filled
+                    coin::deposit(taker_addr, coin::extract_all(&mut taker_order.base_frozen));
+                }
+            } else {
+                let base_left = taker_order.qty-nqty;
+                if (base_left > 0) {
+                    coin::deposit(taker_addr, coin::extract(&mut taker_order.base_frozen, base_left));
+                }
+            };
+            place_order(side, price, pair, taker_order)
         } else {
             destroy_order(taker_addr, taker_order);
 
@@ -1301,6 +1365,7 @@ module sea::market {
     fun match_internal<B, Q>(
         taker_addr: address,
         taker_side: u8,
+        is_market: bool,
         price: u64,
         pair: &mut Pair<B, Q>,
         taker_order: &mut OrderEntity<B, Q>,
@@ -1322,7 +1387,7 @@ module sea::market {
         while (!rbtree::is_empty(orderbook)) {
             let (pos, key, order) = rbtree::borrow_leftmost_keyval_mut(orderbook);
             let (maker_price, maker_order_id) = price::get_price_order_id(key);
-            if (
+            if ( (!is_market) && 
                 ((taker_side == BUY && price < maker_price) ||
                 (taker_side == SELL && price >  maker_price))
              ) {
@@ -1332,6 +1397,7 @@ module sea::market {
             let maker_addr = escrow::get_account_addr_by_id(order.account_id);
             let (taker_complete, maker_complete, trade_event) = swap_order(
                 taker_side,
+                is_market,
                 pair.price_ratio,
                 pair.fee_ratio,
                 maker_price,
@@ -1575,6 +1641,7 @@ module sea::market {
     // return: (taker_complete, maker_complete)
     fun swap_order<B, Q>(
         taker_side: u8, // taker side
+        is_market: bool,
         price_ratio: u64,
         fee_ratio: u64,
         maker_price: u64,
@@ -1584,21 +1651,31 @@ module sea::market {
         base_fee: &mut Coin<B>,
         quote_fee: &mut Coin<Q>,
     ):(bool, bool, EventTrade) {
-        let (match_qty, taker_complete, maker_complete) = 
-            if (taker_order.qty >= maker_order.qty) {
-                if (taker_order.qty == maker_order.qty) {
-                    (taker_order.qty, true, true)
+        let (match_qty, taker_complete, maker_complete) = {
+            let taker_base_qty = 
+                if (is_market && taker_side == BUY) {
+                    // 
+                    utils::calc_base_qty(coin::value(&taker_order.quote_frozen), maker_price, price_ratio)
+                } else {
+                    taker_order.qty
+                };
+            if (taker_base_qty >= maker_order.qty) {
+                if (taker_base_qty == maker_order.qty) {
+                    (taker_base_qty, true, true)
                 } else {
                     (maker_order.qty, false, true)
                 }
             } else {
-                (taker_order.qty, true, false)
-            };
+                (taker_base_qty, true, false)
+            }
+        };
 
         let (quote_vol, fee_amt) = calc_quote_vol(taker_side, match_qty, maker_price, price_ratio, fee_ratio);
         let (fee_maker, fee_plat) = fee::get_maker_fee_shares(fee_amt, maker_order.grid_id > 0);
 
-        taker_order.qty = taker_order.qty - match_qty;
+        if (!is_market) {
+            taker_order.qty = taker_order.qty - match_qty;
+        };
         maker_order.qty = maker_order.qty - match_qty;
         if (taker_side == BUY) {
             let to_taker = coin::extract<B>(&mut maker_order.base_frozen, match_qty);
@@ -1963,6 +2040,14 @@ module sea::market {
         ask_orders
     }
 
+    #[test_only]
+    fun test_btc_pair_quote_qty(
+        qty: u64,
+        price: u64,
+    ): u64 {
+        (((qty as u128) * (price as u128) / 1000000000) as u64)
+    }
+
     // Tests ==================================================================
     #[test]
     fun test_calc_quote_volume() {
@@ -2045,7 +2130,7 @@ module sea::market {
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         let price_ratio = test_register_pair(user1, user2, user3);
 
-        place_limit_order<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000, 150130000000*1500000/1000000000, false, false);
         // check the user's asset OK
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 0);
         let vol = calc_quote_vol_for_buy(150130000000, 1500000, price_ratio);
@@ -2058,7 +2143,7 @@ module sea::market {
         assert!(step0.price == 150130000000, 2);
         assert!(step0.qty == 1500000, 2);
         
-        place_limit_order<T_BTC, T_USD>(user2, SELL, 150130000000, 1000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user2, SELL, 150130000000, 1000000, 150130000000*1000000/1000000000, false, false);
         // check maker user1 assets
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT + 1000000, 2);
         let vol1 = calc_quote_vol_for_buy(150130000000, 1000000, price_ratio);
@@ -2077,7 +2162,7 @@ module sea::market {
         assert!(step0.price == 150130000000, 2);
         assert!(step0.qty == 500000, 2);
 
-        place_limit_order<T_BTC, T_USD>(user3, SELL, 150130000000, 500000, false, false);
+        place_limit_order<T_BTC, T_USD>(user3, SELL, 150130000000, 500000, 150130000000*500000/1000000000, false, false);
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT + 1500000, 6);
         let vol2 = calc_quote_vol_for_buy(150130000000, 500000, price_ratio);
         let fee2 = vol2 * 500/1000000;
@@ -2107,7 +2192,7 @@ module sea::market {
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         let price_ratio = test_register_pair(user1, user2, user3);
 
-        place_limit_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000, 150130000000*1500000/1000000000, false, false);
         // check the user's asset OK
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000, 1000);
         // let vol = calc_quote_vol_for_buy(150130000000, 1500000, price_ratio);
@@ -2119,7 +2204,7 @@ module sea::market {
         assert!(ask0.qty == 1500000, 1);
         assert!(vector::length(&bids) == 0, 1);
         
-        place_limit_order<T_BTC, T_USD>(user2, BUY, 150130000000, 1000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user2, BUY, 150130000000, 1000000, 150130000000*1000000/1000000000, false, false);
         // check maker user1 assets
         let fee1 = 1000000 * 500/1000000;
         let fee1_maker = fee1 * 50/1000;
@@ -2134,7 +2219,7 @@ module sea::market {
         assert!(vector::length(&asks) == 1, 0);
         assert!(vector::length(&bids) == 0, 1);
 
-        place_limit_order<T_BTC, T_USD>(user3, BUY, 150230000000, 500000, false, false);
+        place_limit_order<T_BTC, T_USD>(user3, BUY, 150230000000, 500000, 150230000000*500000/1000000000, false, false);
         let fee2 = 500000 * 500/1000000;
         let fee2_maker = fee2 * 50/1000;
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000+fee1_maker+fee2_maker, 1006);
@@ -2163,7 +2248,7 @@ module sea::market {
 
         let price_ratio = test_register_pair(user1, user2, user3);
 
-        place_limit_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000, 150130000000*1500000/1000000000, false, false);
         // check the user's asset OK
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000, 2000);
         // let vol = calc_quote_vol_for_buy(150130000000, 1500000, price_ratio);
@@ -2175,7 +2260,7 @@ module sea::market {
         assert!(ask0.qty == 1500000, 1);
         assert!(vector::length(&bids) == 0, 1);
         
-        place_limit_order<T_BTC, T_USD>(user2, BUY, 150130000000, 1000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user2, BUY, 150130000000, 1000000, 150130000000*1000000/1000000000, false, false);
         // check maker user1 assets
         let fee1 = 1000000 * 500/1000000;
         let fee1_maker = fee1 * 50/1000;
@@ -2190,7 +2275,7 @@ module sea::market {
         assert!(vector::length(&asks) == 1, 0);
         assert!(vector::length(&bids) == 0, 1);
 
-        place_limit_order<T_BTC, T_USD>(user3, BUY, 150230000000, 500010, false, false);
+        place_limit_order<T_BTC, T_USD>(user3, BUY, 150230000000, 500010, 150230000000*500010/1000000000, false, false);
         let fee2 = 500000 * 500/1000000;
         let fee2_maker = fee2 * 50/1000;
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000+ fee1_maker+fee2_maker, 2006);
@@ -2230,9 +2315,9 @@ module sea::market {
         let price_ratio = test_register_pair(user1, user2, user3);
         _ = price_ratio;
 
-        place_limit_order<T_BTC, T_USD>(user1, SELL, 15013000000000, 1500000, false, false);
-        place_limit_order<T_BTC, T_USD>(user2, SELL, 15012000000000, 1000000, false, false);
-        place_limit_order<T_BTC, T_USD>(user3, BUY,  15023000000000, 2400000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 15013000000000, 1500000, 15013*1500000/1, false, false);
+        place_limit_order<T_BTC, T_USD>(user2, SELL, 15012000000000, 1000000, 15012*1000000/1, false, false);
+        place_limit_order<T_BTC, T_USD>(user3, BUY,  15023000000000, 2400000, 15023*2400000/1, false, false);
     }
 
     #[test(
@@ -2247,8 +2332,8 @@ module sea::market {
     ) acquires NPair, Pair, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        place_postonly_order<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000);
-        place_postonly_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000);
+        place_postonly_order<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000, test_btc_pair_quote_qty(1500000, 150130000000));
+        place_postonly_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000, 0);
     }
 
     #[test(
@@ -2264,8 +2349,8 @@ module sea::market {
     ) acquires NPair, Pair, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        place_postonly_order<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000);
-        place_postonly_order<T_BTC, T_USD>(user1, SELL, 150100000000, 1500000);
+        place_postonly_order<T_BTC, T_USD>(user1, BUY, 150130000000, 1500000, test_btc_pair_quote_qty(1500000, 150130000000));
+        place_postonly_order<T_BTC, T_USD>(user1, SELL, 150100000000, 1500000, 0);
     }
 
     #[test(
@@ -2281,8 +2366,8 @@ module sea::market {
     ) acquires NPair, Pair, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        place_postonly_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000);
-        place_postonly_order<T_BTC, T_USD>(user1, BUY, 150200000000, 1500000);
+        place_postonly_order<T_BTC, T_USD>(user1, SELL, 150130000000, 1500000, 0);
+        place_postonly_order<T_BTC, T_USD>(user1, BUY, 150200000000, 1500000, test_btc_pair_quote_qty(1500000, 150200000000));
     }
 
     #[test(
@@ -2297,7 +2382,8 @@ module sea::market {
     ) acquires NPair, Pair, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        let order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, SELL, 15013000000000, 1500000);
+        let order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, SELL, 15013000000000, 1500000,
+            test_btc_pair_quote_qty(15013000000000, 1500000));
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT-1500000, 10);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT, 11);
         
@@ -2305,7 +2391,8 @@ module sea::market {
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 20);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT, 21);
 
-        let order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, BUY, 15013000000000, 1500000);
+        let order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, BUY, 15013000000000, 1500000,
+            test_btc_pair_quote_qty(15013000000000, 1500000));
         let usd = calc_quote_vol_for_buy(15013000000000, 1500000, 1000000000);
         test_check_account_asset<T_BTC>(address_of(user1), T_BTC_AMT, 30);
         test_check_account_asset<T_USD>(address_of(user1), T_USD_AMT-usd, 31);
@@ -2327,10 +2414,11 @@ module sea::market {
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        let maker_order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, BUY, 15013000000000, 1500000);
+        let maker_order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, BUY, 15013000000000, 1500000,
+            test_btc_pair_quote_qty(15013000000000, 1500000));
 
         // partial filled
-        place_limit_order<T_BTC, T_USD>(user2, SELL, 15013000000000, 1000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user2, SELL, 15013000000000, 1000000, 15013000000000*1000000/1000000000, false, false);
 
         let (usd, total_fee) = calc_quote_vol(SELL, 1000000, 15013000000000, 1000000000, 500);
         cancel_order<T_BTC, T_USD>(user1, BUY, maker_order_key);
@@ -2353,10 +2441,11 @@ module sea::market {
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        let maker_order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, SELL, 15013000000000, 1500000);
+        let maker_order_key = place_postonly_order_return_id<T_BTC, T_USD>(user1, SELL, 15013000000000, 1500000,
+            test_btc_pair_quote_qty(15013000000000, 1500000));
 
         // partial filled
-        place_limit_order<T_BTC, T_USD>(user2, BUY, 15013000000000, 1000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user2, BUY, 15013000000000, 1000000, 15013000000000*1000000/1000000000, false, false);
 
         let (usd, total_fee) = calc_quote_vol(BUY, 1000000, 15013000000000, 1000000000, 500);
 
@@ -2434,7 +2523,7 @@ module sea::market {
         assert!(vector::length(&bids) == 2, 3);
         
         // s0 is filled, s1 is partial filled
-        place_limit_order<T_BTC, T_USD>(user2, BUY, 15017000000000, 1500000+1000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user2, BUY, 15017000000000, 1500000+1000000, 15017*(1500000+1000000)/1, false, false);
 
         let (_, asks, bids) = test_get_pair_price_steps<T_BTC, T_USD>();
         assert!(vector::length(&asks) == 1, 4);
@@ -2508,7 +2597,7 @@ module sea::market {
         // 150120000000 1500000
         
         // partial filled
-        place_limit_order<T_BTC, T_USD>(user2, SELL, 15012000000000, 1500000+1000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user2, SELL, 15012000000000, 1500000+1000000, 15012*(1500000+1000000)/1, false, false);
         let (_, asks, bids) = test_get_pair_price_steps<T_BTC, T_USD>();
 
         assert!(vector::length(&asks) == 3, 4);
@@ -2558,17 +2647,17 @@ module sea::market {
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(user1, user2, user3);
 
-        place_limit_order<T_BTC, T_USD>(user1, BUY, 150120000000, 1000000, false, false);
-        place_limit_order<T_BTC, T_USD>(user1, BUY, 150020000000, 1100000, false, false);
-        place_limit_order<T_BTC, T_USD>(user1, BUY, 149020000000, 1200000, false, false);
-        place_limit_order<T_BTC, T_USD>(user1, BUY, 148020000000, 1300000, false, false);
-        place_limit_order<T_BTC, T_USD>(user1, BUY, 147020000000, 1400000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 150120000000, 1000000, 150120000000*1000000/1000000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 150020000000, 1100000, 150020000000*1100000/1000000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 149020000000, 1200000, 149020000000*1200000/1000000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 148020000000, 1300000, 148020000000*1300000/1000000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 147020000000, 1400000, 147020000000*1400000/1000000000, false, false);
 
-        place_limit_order<T_BTC, T_USD>(user1, SELL, 151120000000, 1000000, false, false);
-        place_limit_order<T_BTC, T_USD>(user1, SELL, 152020000000, 1100000, false, false);
-        place_limit_order<T_BTC, T_USD>(user1, SELL, 152200000000, 1200000, false, false);
-        place_limit_order<T_BTC, T_USD>(user1, SELL, 153020000000, 1300000, false, false);
-        place_limit_order<T_BTC, T_USD>(user1, SELL, 156020000000, 1400000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 151120000000, 1000000, 151120000000*1000000/1000000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 152020000000, 1100000, 152020000000*1100000/1000000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 152200000000, 1200000, 152200000000*1200000/1000000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 153020000000, 1300000, 153020000000*1300000/1000000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 156020000000, 1400000, 156020000000*1400000/1000000000, false, false);
 
         let (bid_orders, ask_orders) = get_account_pair_orders<T_BTC, T_USD>(user1);
 
@@ -2609,7 +2698,7 @@ module sea::market {
         user3: &signer,
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(user1, user2, user3);
-        place_limit_order<T_BTC, T_USD>(user1, BUY, 150120000000, 1000005, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 150120000000, 1000005, 150120000000*1000005/1000000000, false, false);
     }
 
     #[test(
@@ -2624,7 +2713,7 @@ module sea::market {
         user3: &signer,
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(user1, user2, user3);
-        place_limit_order<T_BTC, T_USD>(user1, BUY, 1501210000000, 1000000, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 1501210000000, 1000000, 1501210000000*1000000/1000000000, false, false);
     }
 
     #[test(
@@ -2639,7 +2728,7 @@ module sea::market {
         user3: &signer,
     ) acquires NPair, Pair, AccountGrids, QuoteConfig {
         test_register_pair(user1, user2, user3);
-        place_limit_order<T_BTC, T_USD>(user1, BUY, 150120000000, 10, false, false);
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 150120000000, 10, 150120000000*10/1000000000, false, false);
     }
 
     #[test(
@@ -2656,7 +2745,7 @@ module sea::market {
         let account_id = escrow::get_or_register_account_id(address_of(user1));
         let quote_qty = utils::calc_quote_qty(10000, 150120000000, 1000000000);
         let order = new_order<T_BTC, T_USD>(user1, BUY, 10000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(BUY, 150120000000, order);
+        do_place_postonly_order<T_BTC, T_USD>(BUY, 150120000000, order);
 
         test_check_orders<T_BTC, T_USD>(vector[
         ], vector[
@@ -2668,7 +2757,7 @@ module sea::market {
         ]);
 
         let order2 = new_order<T_BTC, T_USD>(user1, BUY, 34000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(BUY, 150120000000, order2);
+        do_place_postonly_order<T_BTC, T_USD>(BUY, 150120000000, order2);
         test_check_orders<T_BTC, T_USD>(vector[
         ], vector[
             // 5000000000 / 15012 = 333066.8798294698
@@ -2694,7 +2783,7 @@ module sea::market {
         let account_id = escrow::get_or_register_account_id(address_of(user1));
         let quote_qty = utils::calc_quote_qty(10000, 150120000000, 1000000000);
         let order = new_order<T_BTC, T_USD>(user1, SELL, 10000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order);
+        do_place_postonly_order<T_BTC, T_USD>(SELL, 150120000000, order);
 
         test_check_orders<T_BTC, T_USD>(vector[
             PriceStep{qty: 10000, price: 150120000000, orders: 1},
@@ -2706,7 +2795,7 @@ module sea::market {
         ]);
 
         let order2 = new_order<T_BTC, T_USD>(user1, SELL, 20000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order2);
+        do_place_postonly_order<T_BTC, T_USD>(SELL, 150120000000, order2);
         test_check_orders<T_BTC, T_USD>(vector[
             PriceStep{qty: 30000, price: 150120000000, orders: 2},
         ], vector[
@@ -2717,7 +2806,7 @@ module sea::market {
         ]);
 
         let order3 = new_order<T_BTC, T_USD>(user1, SELL, 30000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order3);
+        do_place_postonly_order<T_BTC, T_USD>(SELL, 150120000000, order3);
         test_check_orders<T_BTC, T_USD>(vector[
             PriceStep{qty: 60000, price: 150120000000, orders: 3},
         ], vector[
@@ -2728,7 +2817,7 @@ module sea::market {
         ]);
 
         let order4 = new_order<T_BTC, T_USD>(user1, SELL, 25000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order4);
+        do_place_postonly_order<T_BTC, T_USD>(SELL, 150120000000, order4);
         test_check_orders<T_BTC, T_USD>(vector[
             PriceStep{qty: 85000, price: 150120000000, orders: 4},
         ], vector[
@@ -2754,11 +2843,11 @@ module sea::market {
         let account_id = escrow::get_or_register_account_id(address_of(user1));
         let quote_qty = utils::calc_quote_qty(10000, 150120000000, 1000000000);
         let order = new_order<T_BTC, T_USD>(user2, SELL, 10000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order);
+        do_place_postonly_order<T_BTC, T_USD>(SELL, 150120000000, order);
 
 
         let order = new_order<T_BTC, T_USD>(user1, BUY, 10000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(BUY, 150130000000, order);
+        do_place_postonly_order<T_BTC, T_USD>(BUY, 150130000000, order);
     }
 
     #[test(
@@ -2776,10 +2865,10 @@ module sea::market {
         let account_id = escrow::get_or_register_account_id(address_of(user1));
         let quote_qty = utils::calc_quote_qty(10000, 150120000000, 1000000000);
         let order = new_order<T_BTC, T_USD>(user1, BUY, 10000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(BUY, 150130000000, order);
+        do_place_postonly_order<T_BTC, T_USD>(BUY, 150130000000, order);
 
         let order = new_order<T_BTC, T_USD>(user2, SELL, 10000, quote_qty,account_id, 0);
-        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order);
+        do_place_postonly_order<T_BTC, T_USD>(SELL, 150120000000, order);
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -2949,7 +3038,7 @@ module sea::market {
             new_order<T_BTC, T_USD>(user2, BUY, 400000,
             utils::calc_quote_qty(400000, 15015000000000, btc_price_ratio),
             account2_id,
-            0));
+            0), false);
 
         let fee_deno = fee::get_fee_denominate();
         let fee1 = 333040 * (btc_fee_ratio) / fee_deno;
@@ -2990,7 +3079,7 @@ module sea::market {
             new_order<T_BTC, T_USD>(user3, BUY, 800000,
             utils::calc_quote_qty(800000, 18265000000000, btc_price_ratio),
             account3_id,
-            0));
+            0), false);
 
         // 302770 * 16514000000000 
         // 275250 * 18165000000000
@@ -3035,7 +3124,7 @@ module sea::market {
             new_order<T_BTC, T_USD>(user2, SELL, 400000,
             0,
             account2_id,
-            0));
+            0), false);
         destroy_order(addr2, order_sell1);
         let user2_btc_balance = coin::balance<T_BTC>(addr2);
         assert!(user2_btc_balance == T_BTC_AMT+net_buy1-400000, 4901);
@@ -3078,7 +3167,7 @@ module sea::market {
             new_order<T_BTC, T_USD>(user3, SELL, 400000,
             0,
             account3_id,
-            0));
+            0), false);
         destroy_order(addr3, order_sell2);
         let user3_btc_balance = coin::balance<T_BTC>(addr3);
         assert!(user3_btc_balance == T_BTC_AMT+net_buy2-400000, 5901);
@@ -3174,7 +3263,7 @@ module sea::market {
             new_order<T_BTC, T_USD>(user2, BUY, 400000,
             utils::calc_quote_qty(400000, 15015000000000, btc_price_ratio),
             account2_id,
-            0));
+            0), false);
 
         let fee_deno = fee::get_fee_denominate();
         let fee1 = 350000 * (btc_fee_ratio) / fee_deno;
@@ -3215,7 +3304,7 @@ module sea::market {
             new_order<T_BTC, T_USD>(user3, BUY, 800000,
             utils::calc_quote_qty(800000, 18265000000000, btc_price_ratio),
             account3_id,
-            0));
+            0), false);
 
         // 350000 * 16514000000000 
         // 350000 * 18165000000000
@@ -3260,7 +3349,7 @@ module sea::market {
             new_order<T_BTC, T_USD>(user2, SELL, 400000,
             0,
             account2_id,
-            0));
+            0), false);
         destroy_order(addr2, order_sell1);
         let user2_btc_balance = coin::balance<T_BTC>(addr2);
         assert!(user2_btc_balance == T_BTC_AMT+net_buy1-400000, 4901);
@@ -3303,7 +3392,7 @@ module sea::market {
             new_order<T_BTC, T_USD>(user3, SELL, 400000,
             0,
             account3_id,
-            0));
+            0), false);
         destroy_order(addr3, order_sell2);
         let user3_btc_balance = coin::balance<T_BTC>(addr3);
         assert!(user3_btc_balance == T_BTC_AMT+net_buy2-400000, 5901);
@@ -3424,7 +3513,7 @@ module sea::market {
         let account_id = escrow::get_or_register_account_id(address_of(user1));
         let quote_qty = utils::calc_quote_qty(100000, 150120000000, 1000000000);
         let order = new_order<T_BTC, T_USD>(user2, SELL, 100000, quote_qty, account_id, 0);
-        place_the_order<T_BTC, T_USD>(SELL, 150120000000, order);
+        do_place_postonly_order<T_BTC, T_USD>(SELL, 150120000000, order);
 
         // match order
         let addr3 = address_of(user3);
@@ -3436,7 +3525,8 @@ module sea::market {
             new_order<T_BTC, T_USD>(user3, BUY, 40000,
             15012*40000,
             account3_id,
-            0));
+            0),
+            false);
         destroy_order(addr3, order_sell2);
 
         // let quote = 40000 * 150120000000 / 1000000000;
@@ -3447,5 +3537,115 @@ module sea::market {
 
         withdraw_fee<T_BTC, T_USD>(sea_admin);
         assert!(coin::balance<T_BTC>(address_of(sea_admin)) == plat_part, 10);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3,
+    )]
+    fun test_market_buy_completed(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        // use std::debug;
+        test_register_pair(user1, user2, user3);
+        let btc_pair = borrow_global<Pair<T_BTC, T_USD>>(@sea_spot);
+        // let btc_price_ratio = btc_pair.price_ratio;
+        let btc_fee_ratio = btc_pair.fee_ratio;
+        let fee_deno = fee::get_fee_denominate();
+
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 15012000000000, 10000, 15012*10000/1, false, false);
+
+        market_buy<T_BTC, T_USD>(user2, 15013*10000);
+        let addr2 = address_of(user2);
+        assert!(coin::balance<T_USD>(addr2) == T_USD_AMT - 15012*10000, 1);
+        let btc_fee = 10000 * (btc_fee_ratio) / fee_deno;
+        assert!(coin::balance<T_BTC>(addr2) == T_BTC_AMT + 10000 - btc_fee , 2);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3,
+    )]
+    fun test_market_buy_not_completed(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        // use std::debug;
+        test_register_pair(user1, user2, user3);
+        let btc_pair = borrow_global<Pair<T_BTC, T_USD>>(@sea_spot);
+        let btc_price_ratio = btc_pair.price_ratio;
+        let btc_fee_ratio = btc_pair.fee_ratio;
+        let fee_deno = fee::get_fee_denominate();
+
+        place_limit_order<T_BTC, T_USD>(user1, SELL, 15012000000000, 10000, 15012*10000/1, false, false);
+        market_buy<T_BTC, T_USD>(user2, 1501*10000);
+
+        let addr2 = address_of(user2);
+        let qty = utils::calc_base_qty(1501*10000, 15012000000000, btc_price_ratio); //  1501*10000 *
+        let quote_qty = utils::calc_quote_qty(qty, 15012000000000, btc_price_ratio);
+        assert!(coin::balance<T_USD>(addr2) == T_USD_AMT - quote_qty, 3);
+        let btc_fee = qty * (btc_fee_ratio) / fee_deno;
+        assert!(coin::balance<T_BTC>(addr2) == T_BTC_AMT + qty - btc_fee , 4);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3,
+    )]
+    fun test_market_sell_complete(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        // use std::debug;
+        test_register_pair(user1, user2, user3);
+        let btc_pair = borrow_global<Pair<T_BTC, T_USD>>(@sea_spot);
+        // let btc_price_ratio = btc_pair.price_ratio;
+        let btc_fee_ratio = btc_pair.fee_ratio;
+        let fee_deno = fee::get_fee_denominate();
+
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 15012000000000, 10000, 15012*10000/1, false, false);
+        market_sell<T_BTC, T_USD>(user2, 200000);
+        let addr2 = address_of(user2);
+        // let qty = utils::calc_base_qty(1501*10000, 15012000000000, btc_price_ratio); //  1501*10000 *
+        // let quote_qty = utils::calc_quote_qty(qty, 15012000000000, btc_price_ratio);
+        let quote_qty = 15012*10000;
+        let fee = quote_qty * (btc_fee_ratio) / fee_deno;
+        assert!(coin::balance<T_USD>(addr2) == T_USD_AMT + quote_qty - fee, 5);
+        // let btc_fee = qty * (btc_fee_ratio) / fee_deno;
+        assert!(coin::balance<T_BTC>(addr2) == T_BTC_AMT - 10000, 6);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3,
+    )]
+    fun test_market_sell_not_complete(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) acquires NPair, Pair, AccountGrids, QuoteConfig {
+        // use std::debug;
+        test_register_pair(user1, user2, user3);
+        let btc_pair = borrow_global<Pair<T_BTC, T_USD>>(@sea_spot);
+        // let btc_price_ratio = btc_pair.price_ratio;
+        let btc_fee_ratio = btc_pair.fee_ratio;
+        let fee_deno = fee::get_fee_denominate();
+
+        place_limit_order<T_BTC, T_USD>(user1, BUY, 15012000000000, 10000, 15012*10000/1, false, false);
+        market_sell<T_BTC, T_USD>(user2, 8000);
+        let addr2 = address_of(user2);
+        let quote_qty = 15012*8000;
+        let fee = quote_qty * (btc_fee_ratio) / fee_deno;
+        assert!(coin::balance<T_USD>(addr2) == T_USD_AMT + quote_qty - fee, 7);
+        // let btc_fee = qty * (btc_fee_ratio) / fee_deno;
+        assert!(coin::balance<T_BTC>(addr2) == T_BTC_AMT - 8000, 8);
     }
 }
