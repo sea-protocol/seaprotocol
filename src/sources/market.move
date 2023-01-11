@@ -770,6 +770,10 @@ module sea::market {
         )
     }
 
+    public fun is_empty_order<B, Q>(order: &OrderEntity<B, Q>): bool {
+        coin::value(&order.base_frozen) == 0 && coin::value(&order.quote_frozen) == 0
+    }
+
     public fun new_order<B, Q>(
         account: &signer,
         side: u8,
@@ -1856,7 +1860,7 @@ module sea::market {
     }
 
     #[test_only]
-    fun test_prepare_account_env(): signer {
+    public fun test_prepare_account_env(): signer {
         genesis::setup();
         account::create_account_for_test(@sea_spot);
         let sea_admin = account::create_account_for_test(@sea);
@@ -1866,6 +1870,7 @@ module sea::market {
         initialize(&sea_admin);
         escrow::initialize(&sea_admin);
         fee::initialize(&sea_admin);
+        amm::initialize(&sea_admin);
 
         sea_admin
     }
@@ -1910,7 +1915,7 @@ module sea::market {
     }
 
     #[test_only]
-    fun test_init_coins_and_accounts(
+    public fun test_init_coins_and_accounts(
         sea_admin: &signer,
         user1: &signer,
         user2: &signer,
@@ -2066,7 +2071,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    fun test_register_pair(
+    public fun test_register_pair(
         user1: &signer,
         user2: &signer,
         user3: &signer,

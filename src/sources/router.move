@@ -36,49 +36,51 @@ module sea::router {
     const E_INSUFFICIENT_QUOTE_RESERVE:           u64 = 7007;
     const E_INSUFFICIENT_BASE_RESERVE:            u64 = 7008;
     const E_INSUFFICIENT_AMOUNT_OUT:              u64 = 7009;
+    const E_NON_ZERO_COIN:                        u64 = 7010;
 
     // hybrid swap
     public entry fun hybrid_swap_entry<B, Q>(
         account: &signer,
         side: u8,
         amm_base_qty: u64,
-        amm_qty_in: u64,  // buy: this is quote in; sell: this is amm base in
+        amm_quote_vol: u64,  // buy: this is quote in; sell: this is amm base in
         ob_base_qty: u64,   // order book base qty
-        ob_price: u64, // order book min/max price
-        ob_vol: u64,   // order book quote qty
-        slip_in_out: u64, // slippage in/out quote volume
+        ob_quote_vol: u64,   // order book quote qty
+        slip_out: u64, // slippage in/out quote volume
     ) {
-        let base_out = coin::zero<B>();
-        let quote_out = coin::zero<Q>();
         let addr = address_of(account);
 
-        if (ob_base_qty > 0) {
-            let order = market::new_order<B, Q>(account, side, ob_base_qty, ob_vol, 0, 0);
-            let (_, _, order_left) = market::match_order(addr, side, ob_price, order, true);
-            let (order_base, order_quote) = market::extract_order(order_left);
-            coin::merge(&mut base_out, order_base);
-            coin::merge(&mut quote_out, order_quote);
+        let (base_out, quote_out) = if (side == BUY) {
+            hybrid_swap<B, Q>(
+                addr,
+                side,
+                amm_base_qty,
+                amm_quote_vol,
+                coin::zero(),
+                coin::withdraw(account, amm_quote_vol),
+                market::new_order<B, Q>(account, side, ob_base_qty, ob_quote_vol, 0, 0),
+            )
+        } else {
+            hybrid_swap<B, Q>(
+                addr,
+                side,
+                amm_base_qty,
+                amm_quote_vol,
+                coin::withdraw(account, amm_base_qty),
+                coin::zero(),
+                market::new_order<B, Q>(account, side, ob_base_qty, ob_quote_vol, 0, 0),
+            )
         };
-        if (amm_base_qty > 0) {
-            if (side == BUY) {
-                // buy exact base
-                let coin_in = coin::withdraw<Q>(account, amm_qty_in);
-                let coin_out = swap_quote_for_base<B, Q>(coin_in, amm_base_qty);
-                coin::merge(&mut base_out, coin_out);
-            } else {
-                // sell exact base
-                let coin_in = coin::withdraw<B>(account, amm_base_qty);
-                let coin_out  = swap_base_for_quote<B, Q>(coin_in, amm_qty_in);
-                coin::merge(&mut quote_out, coin_out);
-            };
-        };
+
         if (side == BUY) {
+            // debug::print(&coin::value(&base_out));
             // taker got base
-            assert!(coin::value(&base_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
+            assert!(coin::value(&base_out) >= slip_out, E_INSUFFICIENT_AMOUNT_OUT);
             utils::register_coin_if_not_exist<B>(account);
         } else {
+            // debug::print(&coin::value(&quote_out));
             // taker got quote
-            assert!(coin::value(&quote_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
+            assert!(coin::value(&quote_out) >= slip_out, E_INSUFFICIENT_AMOUNT_OUT);
             utils::register_coin_if_not_exist<Q>(account);
         };
 
@@ -202,55 +204,50 @@ module sea::router {
         coin::transfer<LP<B, Q>>(&escrow::get_spot_account(), to, amount);
     }
 
-    /*
-    // if buy base, provide quote coin
-    // if sell base, provide base coin
     public fun hybrid_swap<B, Q>(
-        side: u8,
         addr: address,
-        total_base_in: Coin<B>,
-        total_quote_in: Coin<Q>,
+        side: u8,
         amm_base_qty: u64,
-        amm_qty_in: u64,  // buy: this is quote in; sell: this is amm base in
-        ob_base_qty: u64, // order book base qty
-        ob_price: u64, // order book min/max price
-        ob_vol: u64,   // order book quote qty
-        slip_in_out: u64, // slippage in/out quote volume
+        amm_quote_vol: u64,
+        amm_base: Coin<B>,
+        amm_quote: Coin<Q>,  // buy: this is quote in; sell: this is amm base in
+        order: market::OrderEntity<B, Q>,   // order book quote qty
     ): (Coin<B>, Coin<Q>) {
         let base_out = coin::zero<B>();
         let quote_out = coin::zero<Q>();
 
-        if (ob_base_qty > 0) {
-            let order = market::build_order<B, Q>(account, side, ob_base_qty, ob_vol, 0, 0);
-            let order_left = market::match_order(addr, side, ob_price, order);
+        if (!market::is_empty_order<B, Q>(&order)) {
+            let (_, _, order_left) = market::match_order(addr, side, 0, order, true);
             let (order_base, order_quote) = market::extract_order(order_left);
             coin::merge(&mut base_out, order_base);
             coin::merge(&mut quote_out, order_quote);
+        } else {
+            market::destroy_order(addr, order);
         };
-        if (amm_base_qty > 0) {
+
+        if (amm_base_qty > 0 || amm_quote_vol > 0) {
             if (side == BUY) {
                 // buy exact base
-                let coin_in = coin::withdraw<Q>(account, amm_qty_in);
-                let coin_out = swap_quote_for_base<B, Q>(coin_in, amm_base_qty);
+                // let coin_in = coin::withdraw<Q>(account, amm_quote_vol);
+                let coin_out = swap_quote_for_base<B, Q>(amm_quote, amm_base_qty);
                 coin::merge(&mut base_out, coin_out);
+                coin::merge(&mut base_out, amm_base);
             } else {
                 // sell exact base
-                let coin_in = coin::withdraw<B>(account, amm_base_qty);
-                let coin_out  = swap_base_for_quote<B, Q>(coin_in, amm_qty_in);
+                // let coin_in = coin::withdraw<B>(account, amm_base_qty);
+                let coin_out  = swap_base_for_quote<B, Q>(amm_base, amm_quote_vol);
                 coin::merge(&mut quote_out, coin_out);
+                coin::merge(&mut quote_out, amm_quote);
             };
-        };
-        if (side == BUY) {
-            // taker got base
-            assert!(coin::value(&base_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
         } else {
-            // taker got quote
-            assert!(coin::value(&quote_out) > slip_in_out, E_INSUFFICIENT_AMOUNT_OUT);
+            assert!(coin::value(&amm_base) == 0, E_NON_ZERO_COIN);
+            assert!(coin::value(&amm_quote) == 0, E_NON_ZERO_COIN);
+            coin::destroy_zero(amm_base);
+            coin::destroy_zero(amm_quote);
         };
 
         (base_out, quote_out)
     }
-    */
 
     // sell base, buy quote
     public fun swap_base_for_quote<B, Q>(
@@ -274,7 +271,7 @@ module sea::router {
         coin_out
     }
 
-    /// out_is_base: in user perspective
+    /// out_is_base: by user perspective
     public fun get_amount_in<B, Q>(
         amount_out: u64,
         out_is_base: bool,
@@ -325,8 +322,218 @@ module sea::router {
         (amount_out as u64)
     }
 
-    #[test]
-    fun test_hybrid_swap() {
 
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_buy_entry(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            2, // sell
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::withdraw(user2, 120000),
+                coin::zero(),
+            ),
+        );
+
+        let quote_in = get_amount_in<market::T_BTC, market::T_USD>(215000, true);
+        // buy
+        hybrid_swap_entry<market::T_BTC, market::T_USD>(
+            user3,
+            1,
+            215000,
+            quote_in,
+            120000,
+            120000 * 15120,
+            215000+(120000-120000*5/10000),
+        );
     }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_buy(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            2, // sell
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::withdraw(user2, 120000),
+                coin::zero(),
+            ),
+        );
+
+        let quote_in_vol = get_amount_in<market::T_BTC, market::T_USD>(215000, true);
+        let addr3 = address_of(user3);
+        let taker_order = market::new_order(
+            user3,
+            1, // buy
+            0,
+            120000 * 15120,
+            0,
+            0,
+        );
+        // buy
+        let (base_out, quote_out) = hybrid_swap<market::T_BTC, market::T_USD>(
+            addr3,
+            1,
+            215000,
+            quote_in_vol,
+            coin::zero(),
+            coin::withdraw(user3, quote_in_vol),
+            // 120000,
+            // 120000 * 15120,
+            taker_order,
+            // 215000,
+            // quote_in,
+            // 120000,
+            // 120000 * 15120,
+            // 215000+(120000-120000*5/10000),
+        );
+        assert!(coin::value(&quote_out) == 0, 11);
+        coin::destroy_zero(quote_out);
+        // debug::print(&coin::value(&base_out));
+        assert!(coin::value(&base_out) == 215000 + (120000 - 120000*5/10000), 12);
+        coin::deposit(addr3, base_out);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_sell_entry(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            1, // buy
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::zero(),
+                coin::withdraw(user2, 120000*15120),
+            ),
+        );
+
+        let quote_out = get_amount_out<market::T_BTC, market::T_USD>(215000, true);
+        // debug::print(&quote_out);
+        // sell
+        hybrid_swap_entry<market::T_BTC, market::T_USD>(
+            user3,
+            2,
+            215000,
+            quote_out,
+            120000,
+            120000 * 15120,
+            quote_out+(120000-120000*5/10000)*15120,
+        );
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_sell(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            1, // buy
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::zero(),
+                coin::withdraw(user2, 120000*15120),
+            ),
+        );
+
+        let quote_out_vol = get_amount_out<market::T_BTC, market::T_USD>(215000, true);
+        let addr3 = address_of(user3);
+        let taker_order = market::new_order(
+            user3,
+            2, // sell
+            120000,
+            0,
+            0,
+            0,
+        );
+            // quote_out+(120000-120000*5/10000)*15120);
+        // debug::print(&quote_out);
+        // sell
+        let (base_out, quote_out) = hybrid_swap<market::T_BTC, market::T_USD>(
+            addr3,
+            2,
+            215000,
+            quote_out_vol,
+            coin::withdraw(user3, 215000),
+            coin::zero(),
+            // 120000,
+            // 120000 * 15120,
+            taker_order,
+        );
+        assert!(coin::value(&base_out) == 0, 1);
+        coin::destroy_zero(base_out);
+        let quote_ob_vol = 120000 * 15120;
+        let ob_fee = quote_ob_vol * 5 / 10000;
+        let quote_ob_net = quote_ob_vol - ob_fee;
+        // debug::print(&quote_ob_net);
+        // debug::print(&coin::value(&quote_out));
+        assert!(coin::value(&quote_out) == quote_out_vol + quote_ob_net, 2);
+        coin::deposit(addr3, quote_out);
+    }
+
+    // flash loan
 }
