@@ -433,6 +433,15 @@ module sea::amm {
         (base_reserve, quote_reserve, pool.fee_ratio)
     }
 
+    public fun get_pool_reserve_fee_u128<B, Q>(): (u128, u128, u128) acquires Pool {
+        let pool = borrow_global_mut<Pool<B, Q>>(@sea_spot);
+        assert!(pool.locked == false, E_POOL_LOCKED);
+        let base_reserve = coin::value(&pool.base_reserve);
+        let quote_reserve = coin::value(&pool.quote_reserve);
+
+        ((base_reserve as u128), (quote_reserve as u128), (pool.fee_ratio as u128))
+    }
+
     // Private functions ====================================================
 
     fun assert_amm_unlocked() acquires AMMConfig {

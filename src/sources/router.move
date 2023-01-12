@@ -11,6 +11,7 @@
 /// 
 module sea::router {
     use std::signer::address_of;
+    use std::vector;
     // use std::debug;
     use aptos_framework::coin::{Self, Coin};
 
@@ -37,16 +38,17 @@ module sea::router {
     const E_INSUFFICIENT_BASE_RESERVE:            u64 = 7008;
     const E_INSUFFICIENT_AMOUNT_OUT:              u64 = 7009;
     const E_NON_ZERO_COIN:                        u64 = 7010;
+    const E_EMPTY_POOL:                           u64 = 7011;
 
     // hybrid swap
     public entry fun hybrid_swap_entry<B, Q>(
         account: &signer,
         side: u8,
-        amm_base_qty: u64,
-        amm_quote_vol: u64,  // buy: this is quote in; sell: this is amm base in
+        amm_base_qty: u64,  // buy: this is amm base out; sell: is is amm base in
+        amm_quote_vol: u64,  // buy: this is quote in; sell: this is amm quote out
         ob_base_qty: u64,   // order book base qty
         ob_quote_vol: u64,   // order book quote qty
-        slip_out: u64, // slippage in/out quote volume
+        slip_out: u64, // slippage min out quote volume
     ) {
         let addr = address_of(account);
 
@@ -87,6 +89,18 @@ module sea::router {
         let addr = address_of(account);
         coin::deposit(addr, base_out);
         coin::deposit(addr, quote_out);
+    }
+
+    // hybrid swap
+    public entry fun hybrid_swap_auto_entry<B, Q>(
+        account: &signer,
+        side: u8,
+        qty: u64,  // if side is BUY, this is quote amount; if side is SELL, this is base amoount
+        slip_out: u64, // slippage min out quote volume
+    ) {
+        let (amm_base_qty, amm_quote_qty, ob_base_qty, ob_quote_vol) = calc_hybrid_partial<B, Q>(side, qty);
+
+        hybrid_swap_entry<B, Q>(account, side, amm_base_qty, amm_quote_qty, ob_base_qty, ob_quote_vol,slip_out);
     }
 
     public entry fun add_liquidity<B, Q>(
@@ -202,6 +216,99 @@ module sea::router {
         let amount = coin::balance<LP<B, Q>>(@sea_spot) - amm::get_min_liquidity();
         assert!(amount > 0, E_INSUFFICIENT_AMOUNT);
         coin::transfer<LP<B, Q>>(&escrow::get_spot_account(), to, amount);
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+    /// PUBLIC FUNCTIONS
+    ////////////////////////////////////////////////////////////////////////////
+    
+    // use orderbook match price better than amm, until end
+    public fun calc_hybrid_partial<B, Q>(
+        side: u8,
+        qty: u64,
+    ): (u64, u64, u64, u64) {
+        let steps = market::get_pair_side_steps<B, Q>(side);
+        // first, check the orderbook's price is 
+        if (vector::length(&steps) == 0) {
+            // all use amm
+            if (side == BUY) {
+                return (get_amount_out<B, Q>(qty, false), qty, 0, 0)
+            } else {
+                return (qty, get_amount_out<B, Q>(qty, true), 0, 0)
+            }
+        };
+        let (base_reserve, quote_reserve, amm_fee_ratio) = amm::get_pool_reserve_fee_u128<B, Q>();
+        assert!(base_reserve > 0 && quote_reserve > 0, E_EMPTY_POOL);
+        let (price_ratio, _, lot_size) = market::get_pair_info_u128<B, Q>();
+        let amm_fee_deno = (fee::get_fee_denominate() as u128);
+
+        let i = 0;
+        let total_ob_base = 0;
+        let total_ob_quote = 0;
+        while(i < vector::length(&steps)) {
+            let step = vector::borrow(&steps, i);
+            let (step_price, step_qty) = market::get_price_step_u128(step);
+            let (base_qty, quote_qty) = get_clob_qty(
+                side,
+                step_price,
+                lot_size,
+                step_qty,
+                price_ratio,
+                base_reserve,
+                quote_reserve,
+                amm_fee_ratio,
+                amm_fee_deno
+            );
+            if (base_qty == 0) {
+                break
+            };
+
+            total_ob_base = total_ob_base + base_qty;
+            total_ob_quote = total_ob_quote + quote_qty;
+            i = i + 1;
+        };
+
+        (0, qty, total_ob_base, total_ob_quote)
+    }
+
+    // compare is amm price is better than orderbook price
+    // price is orderbook maker price
+    fun get_clob_qty(
+        side: u8,
+        price: u64,
+        lot_size: u64,
+        qty: u128,
+        price_ratio: u128,
+        base_reserve: u128,
+        quote_reserve: u128,
+        amm_fee_ratio: u128,
+        amm_fee_deno: u128,
+    ): (u64, u64) {
+        let amount_in_with_fee = qty * (amm_fee_deno - amm_fee_ratio);
+        let base_qty = 0;
+        let quote_qty = 0;
+
+        lot_size;
+        if (side == BUY) {
+            // qty is quote in
+            // get_amount_out
+            let numerator = amount_in_with_fee * base_reserve;
+            let denominator = quote_reserve * amm_fee_deno + amount_in_with_fee;
+            let base_out = numerator / denominator;
+            let amm_price: u64 = (((qty * price_ratio) / base_out) as u64);
+
+            price < amm_price
+        } else {
+            // qty is base in
+            let numerator = amount_in_with_fee * quote_reserve;
+            let denominator = base_reserve * amm_fee_deno + amount_in_with_fee;
+            let quote_out = numerator / denominator;
+            let amm_price: u64 = (((quote_out * price_ratio) / qty) as u64);
+
+            price > amm_price
+        };
+
+        (base_qty, quote_qty)
     }
 
     public fun hybrid_swap<B, Q>(
@@ -534,6 +641,8 @@ module sea::router {
         assert!(coin::value(&quote_out) == quote_out_vol + quote_ob_net, 2);
         coin::deposit(addr3, quote_out);
     }
+
+    // alloc hybrid swap
 
     // flash loan
 }
