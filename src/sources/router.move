@@ -25,6 +25,7 @@ module sea::router {
     
     const BUY:                u8   = 1;
     const SELL:               u8   = 2;
+    const SIDE_ALL:           u8   = 3;
 
     const E_NO_AUTH:                              u64 = 100;
     const E_POOL_NOT_EXIST:                       u64 = 7000;
@@ -223,11 +224,12 @@ module sea::router {
     ////////////////////////////////////////////////////////////////////////////
     
     // use orderbook match price better than amm, until end
+    // return: amm_base_qty amm_quote_vol ob_base_qty ob_quote_vol
     public fun calc_hybrid_partial<B, Q>(
         side: u8,
         qty: u64,
     ): (u64, u64, u64, u64) {
-        let steps = market::get_pair_side_steps<B, Q>(side);
+        let steps = market::get_pair_side_steps<B, Q>(SIDE_ALL - side);
         // first, check the orderbook's price is 
         if (vector::length(&steps) == 0) {
             // all use amm
@@ -243,72 +245,153 @@ module sea::router {
         let amm_fee_deno = (fee::get_fee_denominate() as u128);
 
         let i = 0;
-        let total_ob_base = 0;
-        let total_ob_quote = 0;
+        let ob_base_qty = 0;
+        let ob_quote_vol = 0;
+        let qty_u128 = (qty as u128);
+        let amm_best_price: u128 = base_reserve * price_ratio / quote_reserve;
+        let (amm_base_qty, amm_quote_vol, amm_worst_price) = get_amm_price(
+            side,
+            qty_u128,
+            price_ratio,
+            base_reserve,
+            quote_reserve,
+            amm_fee_ratio,
+            amm_fee_deno,
+        );
+
         while(i < vector::length(&steps)) {
             let step = vector::borrow(&steps, i);
             let (step_price, step_qty) = market::get_price_step_u128(step);
-            let (base_qty, quote_qty) = get_clob_qty(
+            // if step_qty 
+            let step_quote = utils::calc_quote_qty_u128(step_qty, step_price, price_ratio);
+            if (side == BUY) {
+                if (step_price >= amm_worst_price) {
+                    break
+                };
+                if (step_price < amm_best_price) {
+                    i = i + 1;
+                    ob_base_qty = ob_base_qty + step_qty;
+                    ob_quote_vol = ob_quote_vol + step_quote;
+                    continue
+                };
+                if (ob_quote_vol + step_quote >= qty_u128) 
+                    step_qty = (qty_u128 - ob_quote_vol) / lot_size * lot_size;
+            } else if (side == SELL) {
+                if (step_price <= amm_worst_price) {
+                    break
+                };
+                if (step_price > amm_best_price) {
+                    i = i + 1;
+                    ob_base_qty = ob_base_qty + step_qty;
+                    ob_quote_vol = ob_quote_vol + step_quote;
+                    continue
+                };
+                if (step_qty + ob_base_qty >= qty_u128)
+                    step_qty = (qty_u128 - ob_quote_vol) / lot_size * lot_size;
+            };
+            if (step_qty == 0) break;
+            // step_quote = utils::calc_quote_qty_u128(step_qty, (step_price as u128), price_ratio);
+
+            let step_base_qty;
+            let step_quote_vol;
+            (amm_base_qty, amm_quote_vol, step_base_qty, step_quote_vol) = get_clob_qty(
                 side,
                 step_price,
+                qty_u128,
+                ob_base_qty,
                 lot_size,
                 step_qty,
                 price_ratio,
                 base_reserve,
                 quote_reserve,
                 amm_fee_ratio,
-                amm_fee_deno
+                amm_fee_deno,
             );
-            if (base_qty == 0) {
-                break
-            };
-
-            total_ob_base = total_ob_base + base_qty;
-            total_ob_quote = total_ob_quote + quote_qty;
+            ob_base_qty = ob_base_qty + step_base_qty;
+            ob_quote_vol = ob_quote_vol + step_quote_vol;
             i = i + 1;
         };
 
-        (0, qty, total_ob_base, total_ob_quote)
+        ((amm_base_qty as u64), (amm_quote_vol as u64), (ob_base_qty as u64), (ob_quote_vol as u64))
+    }
+
+    public fun get_amm_price(
+        side: u8,
+        qty: u128,
+        price_ratio: u128,
+        base_reserve: u128,
+        quote_reserve: u128,
+        fee_ratio: u128,
+        fee_deno: u128,
+    ): (u128, u128, u128) {
+        let amount_in_with_fee = qty * (fee_deno - fee_ratio);
+        if (side == SELL) {
+            let numerator = amount_in_with_fee * base_reserve;
+            let denominator = quote_reserve * fee_deno + amount_in_with_fee;
+            let base_out = numerator / denominator;
+            (base_out, qty, ((qty * price_ratio) / base_out))
+        } else {
+            let numerator = amount_in_with_fee * quote_reserve;
+            let denominator = base_reserve * fee_deno + amount_in_with_fee;
+            let quote_out = numerator / denominator;
+            (qty, quote_out, ((quote_out * price_ratio) / qty))
+        }
     }
 
     // compare is amm price is better than orderbook price
     // price is orderbook maker price
+    // return: step_base_qty, step_quote_vol, step_amm_price
     fun get_clob_qty(
         side: u8,
-        price: u64,
-        lot_size: u64,
+        price: u128,
         qty: u128,
+        total_ob_qty: u128,
+        lot_size: u128,
+        step_base_qty: u128,    // order book step base qty
         price_ratio: u128,
         base_reserve: u128,
         quote_reserve: u128,
         amm_fee_ratio: u128,
         amm_fee_deno: u128,
-    ): (u64, u64) {
-        let amount_in_with_fee = qty * (amm_fee_deno - amm_fee_ratio);
-        let base_qty = 0;
-        let quote_qty = 0;
+    ): (u128, u128, u128, u128) {
+        let amm_base_qty: u128;
+        let amm_quote_vol: u128;
+        let amm_step_price: u128;
+        let step_quote_vol: u128;
+        // let complete = false;
 
-        lot_size;
-        if (side == BUY) {
-            // qty is quote in
-            // get_amount_out
-            let numerator = amount_in_with_fee * base_reserve;
-            let denominator = quote_reserve * amm_fee_deno + amount_in_with_fee;
-            let base_out = numerator / denominator;
-            let amm_price: u64 = (((qty * price_ratio) / base_out) as u64);
+        loop {
+            if (side == BUY) {
+                // qty is quote in
+                // get_amount_out
+                step_quote_vol = utils::calc_quote_qty_u128(step_base_qty, (price as u128), price_ratio);
+                amm_quote_vol = (qty - total_ob_qty - step_quote_vol);
+                let amount_in_with_fee = amm_quote_vol * (amm_fee_deno - amm_fee_ratio);
+                let numerator = amount_in_with_fee * base_reserve;
+                let denominator = quote_reserve * amm_fee_deno + amount_in_with_fee;
+                amm_base_qty = numerator / denominator;
+                amm_step_price = ((amm_base_qty * price_ratio) / amm_quote_vol);
 
-            price < amm_price
-        } else {
-            // qty is base in
-            let numerator = amount_in_with_fee * quote_reserve;
-            let denominator = base_reserve * amm_fee_deno + amount_in_with_fee;
-            let quote_out = numerator / denominator;
-            let amm_price: u64 = (((quote_out * price_ratio) / qty) as u64);
+                // amm price is better, stop
+                if (amm_step_price <= price) break;
+            } else {
+                // qty is base in
+                amm_base_qty = (qty - total_ob_qty - step_base_qty);
+                let amount_in_with_fee = amm_base_qty * (amm_fee_deno - amm_fee_ratio);
+                let numerator = amount_in_with_fee * quote_reserve;
+                let denominator = base_reserve * amm_fee_deno + amount_in_with_fee;
+                amm_quote_vol = numerator / denominator;
+                amm_step_price = ((amm_quote_vol * price_ratio) / amm_base_qty);
 
-            price > amm_price
+                step_quote_vol = utils::calc_quote_qty_u128(step_base_qty, (price as u128), price_ratio);
+                if (amm_step_price >= price) break;
+            };
+
+            step_base_qty = (step_base_qty / 2) / lot_size * lot_size;
+            if (step_base_qty == 0) break;
         };
 
-        (base_qty, quote_qty)
+        (amm_base_qty, amm_quote_vol, step_base_qty, step_quote_vol)
     }
 
     public fun hybrid_swap<B, Q>(
@@ -535,6 +618,198 @@ module sea::router {
         coin::deposit(addr3, base_out);
     }
 
+    // swap just use orderbook, taker complete filled
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_buy_only_orderbook_filled(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            2, // sell
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::withdraw(user2, 120000),
+                coin::zero(),
+            ),
+        );
+
+        // let quote_in_vol = get_amount_in<market::T_BTC, market::T_USD>(215000, true);
+        let addr3 = address_of(user3);
+        let taker_order = market::new_order(
+            user3,
+            1, // buy
+            0,
+            100000 * 15120,
+            0,
+            0,
+        );
+        // buy
+        let (base_out, quote_out) = hybrid_swap<market::T_BTC, market::T_USD>(
+            addr3,
+            1,
+            0,
+            0,
+            coin::zero(),
+            coin::zero(),
+            // 120000,
+            // 120000 * 15120,
+            taker_order,
+            // 215000,
+            // quote_in,
+            // 120000,
+            // 120000 * 15120,
+            // 215000+(120000-120000*5/10000),
+        );
+        assert!(coin::value(&quote_out) == 0, 11);
+        coin::destroy_zero(quote_out);
+        // debug::print(&coin::value(&base_out));
+        assert!(coin::value(&base_out) == (100000 - 100000*5/10000), 12);
+        coin::deposit(addr3, base_out);
+    }
+
+    // swap just use orderbook, taker partial filled
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_buy_only_orderbook_partial(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            2, // sell
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::withdraw(user2, 120000),
+                coin::zero(),
+            ),
+        );
+
+        // let quote_in_vol = get_amount_in<market::T_BTC, market::T_USD>(215000, true);
+        let addr3 = address_of(user3);
+        let taker_order = market::new_order(
+            user3,
+            1, // buy
+            0,
+            200000 * 15120,
+            0,
+            0,
+        );
+        // buy
+        let (base_out, quote_out) = hybrid_swap<market::T_BTC, market::T_USD>(
+            addr3,
+            1,
+            0,
+            0,
+            coin::zero(),
+            coin::zero(),
+            // 120000,
+            // 120000 * 15120,
+            taker_order,
+            // 215000,
+            // quote_in,
+            // 120000,
+            // 120000 * 15120,
+            // 215000+(120000-120000*5/10000),
+        );
+        assert!(coin::value(&quote_out) == 80000 * 15120, 11);
+        coin::deposit(addr3, quote_out);
+        // debug::print(&coin::value(&base_out));
+        assert!(coin::value(&base_out) == (120000 - 120000*5/10000), 12);
+        coin::deposit(addr3, base_out);
+    }
+
+    // swap just use amm
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_buy_only_amm(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            2, // sell
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::withdraw(user2, 120000),
+                coin::zero(),
+            ),
+        );
+
+        let quote_in_vol = get_amount_in<market::T_BTC, market::T_USD>(215000, true);
+        let addr3 = address_of(user3);
+        let taker_order = market::new_order(
+            user3,
+            1, // buy
+            0,
+            0,
+            0,
+            0,
+        );
+        // buy
+        let (base_out, quote_out) = hybrid_swap<market::T_BTC, market::T_USD>(
+            addr3,
+            1,
+            215000,
+            quote_in_vol,
+            coin::zero(),
+            coin::withdraw(user3, quote_in_vol),
+            // 120000,
+            // 120000 * 15120,
+            taker_order,
+            // 215000,
+            // quote_in,
+            // 120000,
+            // 120000 * 15120,
+            // 215000+(120000-120000*5/10000),
+        );
+        assert!(coin::value(&quote_out) == 0, 11);
+        coin::destroy_zero(quote_out);
+        // debug::print(&coin::value(&base_out));
+        assert!(coin::value(&base_out) == 215000, 12);
+        coin::deposit(addr3, base_out);
+    }
+
     #[test(
         user1 = @user_1,
         user2 = @user_2,
@@ -639,6 +914,201 @@ module sea::router {
         // debug::print(&quote_ob_net);
         // debug::print(&coin::value(&quote_out));
         assert!(coin::value(&quote_out) == quote_out_vol + quote_ob_net, 2);
+        coin::deposit(addr3, quote_out);
+    }
+
+    // swap just use orderbook
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_sell_only_orderbook_filled(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            1, // buy
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::zero(),
+                coin::withdraw(user2, 120000*15120),
+            ),
+        );
+
+        // let quote_out_vol = get_amount_out<market::T_BTC, market::T_USD>(215000, true);
+        let addr3 = address_of(user3);
+        let taker_order = market::new_order(
+            user3,
+            2, // sell
+            100000,
+            0,
+            0,
+            0,
+        );
+            // quote_out+(120000-120000*5/10000)*15120);
+        // debug::print(&quote_out);
+        // sell
+        let (base_out, quote_out) = hybrid_swap<market::T_BTC, market::T_USD>(
+            addr3,
+            2,
+            0,
+            0,
+            coin::zero(),
+            coin::zero(),
+            // 120000,
+            // 120000 * 15120,
+            taker_order,
+        );
+        assert!(coin::value(&base_out) == 0, 1);
+        coin::destroy_zero(base_out);
+        let quote_ob_vol = 100000 * 15120;
+        let ob_fee = quote_ob_vol * 5 / 10000;
+        let quote_ob_net = quote_ob_vol - ob_fee;
+        // debug::print(&quote_ob_net);
+        // debug::print(&coin::value(&quote_out));
+        assert!(coin::value(&quote_out) == quote_ob_net, 2);
+        coin::deposit(addr3, quote_out);
+    }
+
+    // swap just use orderbook, taker partial filled
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_sell_only_orderbook_partial(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            1, // buy
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::zero(),
+                coin::withdraw(user2, 120000*15120),
+            ),
+        );
+
+        // let quote_out_vol = get_amount_out<market::T_BTC, market::T_USD>(215000, true);
+        let addr3 = address_of(user3);
+        let taker_order = market::new_order(
+            user3,
+            2, // sell
+            200000,
+            0,
+            0,
+            0,
+        );
+            // quote_out+(120000-120000*5/10000)*15120);
+        // debug::print(&quote_out);
+        // sell
+        let (base_out, quote_out) = hybrid_swap<market::T_BTC, market::T_USD>(
+            addr3,
+            2,
+            0,
+            0,
+            coin::zero(),
+            coin::zero(),
+            // 120000,
+            // 120000 * 15120,
+            taker_order,
+        );
+        assert!(coin::value(&base_out) == 200000-120000, 1);
+        coin::deposit(addr3, base_out);
+        let quote_ob_vol = 120000 * 15120;
+        let ob_fee = quote_ob_vol * 5 / 10000;
+        let quote_ob_net = quote_ob_vol - ob_fee;
+        // debug::print(&quote_ob_net);
+        // debug::print(&coin::value(&quote_out));
+        assert!(coin::value(&quote_out) == quote_ob_net, 2);
+        coin::deposit(addr3, quote_out);
+    }
+
+    // swap just use amm
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_hybrid_swap_sell_only_amm(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000, 100000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000, 200000 * 15120, 0, 0);
+
+        let addr2 = address_of(user2);
+        let account_id2 = escrow::get_or_register_account_id(addr2);
+        market::do_place_postonly_order<market::T_BTC, market::T_USD>(
+            1, // buy
+            15120 * 1000000000,
+            market::build_order<market::T_BTC, market::T_USD>(
+                account_id2,
+                0,
+                120000,
+                coin::zero(),
+                coin::withdraw(user2, 120000*15120),
+            ),
+        );
+
+        // let quote_out_vol = get_amount_out<market::T_BTC, market::T_USD>(215000, true);
+        let addr3 = address_of(user3);
+        let taker_order = market::new_order(
+            user3,
+            2, // sell
+            200000,
+            0,
+            0,
+            0,
+        );
+            // quote_out+(120000-120000*5/10000)*15120);
+        // debug::print(&quote_out);
+        // sell
+        let (base_out, quote_out) = hybrid_swap<market::T_BTC, market::T_USD>(
+            addr3,
+            2,
+            0,
+            0,
+            coin::zero(),
+            coin::zero(),
+            // 120000,
+            // 120000 * 15120,
+            taker_order,
+        );
+        assert!(coin::value(&base_out) == 200000-120000, 1);
+        coin::deposit(addr3, base_out);
+        let quote_ob_vol = 120000 * 15120;
+        let ob_fee = quote_ob_vol * 5 / 10000;
+        let quote_ob_net = quote_ob_vol - ob_fee;
+        // debug::print(&quote_ob_net);
+        // debug::print(&coin::value(&quote_out));
+        assert!(coin::value(&quote_out) == quote_ob_net, 2);
         coin::deposit(addr3, quote_out);
     }
 

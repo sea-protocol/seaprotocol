@@ -730,10 +730,10 @@ module sea::market {
     }
 
     // price ratio, fee ratio, lot_size
-    public fun get_pair_info_u128<B, Q>(): (u128, u128, u64) acquires Pair {
+    public fun get_pair_info_u128<B, Q>(): (u128, u128, u128) acquires Pair {
         let pair = borrow_global<Pair<B, Q>>(@sea_spot);
 
-        ((pair.price_ratio as u128), (pair.fee_ratio as u128), pair.lot_size)
+        ((pair.price_ratio as u128), (pair.fee_ratio as u128), (pair.lot_size as u128))
     }
 
     // get_account_pair_orders get account pair orders, both asks and bids
@@ -774,8 +774,8 @@ module sea::market {
         (step.price, step.qty, step.orders)
     }
 
-    public fun get_price_step_u128(step: &PriceStep): (u64, u128) {
-        (step.price, (step.qty as u128))
+    public fun get_price_step_u128(step: &PriceStep): (u128, u128) {
+        ((step.price as u128), (step.qty as u128))
     }
 
 
@@ -1056,6 +1056,8 @@ module sea::market {
         validate_order_qty_price(pair, qty, price);
     }
 
+    // if side is SELL, sold base qty > pair.lot_size;
+    // if side is BUY, buy frozen quote qty > pair.min_notional;
     fun validate_market_order<B, Q>(
         pair: &Pair<B, Q>,
         side: u8,
@@ -1065,8 +1067,10 @@ module sea::market {
         if (side == SELL) {
             assert!(coin::value(&order.base_frozen) == qty, E_BASE_NOT_ENOUGH);
             assert!(filter_lot_size(qty, pair.lot_size), E_LOT_SIZE);
-        } else {
-            assert!(coin::value(&order.quote_frozen) >= pair.min_notional, E_MIN_NOTIONAL);
+        }else {
+            // we dont know the price, so here wo cannot compare to lot_size
+            assert!(coin::value(&order.quote_frozen) > 0, E_MIN_NOTIONAL);
+        //     assert!(coin::value(&order.quote_frozen) >= pair.min_notional, E_MIN_NOTIONAL);
         }
     }
 
