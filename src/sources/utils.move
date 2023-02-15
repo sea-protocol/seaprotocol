@@ -36,7 +36,9 @@ module sea::utils {
         price: u64,
         price_ratio: u64,
     ): u64 {
-        (((qty as u128) * (price as u128)/(price_ratio as u128)) as u64)
+        let quote_qty = ((qty as u128) * (price as u128)/(price_ratio as u128));
+        
+        (quote_qty as u64)
     }
 
     public fun calc_quote_qty_u128(
