@@ -2118,7 +2118,7 @@ module sea::market {
     }
 
     #[test]
-    #[expected_failure(abort_code = 0x102)] // E_QUOTE_CONFIG_EXISTS
+    #[expected_failure(abort_code = E_QUOTE_CONFIG_EXISTS)] // 0x102
     fun test_register_quote_dup() {
         let sea_admin = test_prepare_account_env();
         let (bc, fc, mc) = coin::initialize<T_USD>(&sea_admin,
@@ -2359,7 +2359,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    #[expected_failure(abort_code = 0x10C)] // E_PRICE_TOO_LOW
+    #[expected_failure(abort_code = E_PRICE_TOO_LOW)] // E_PRICE_TOO_LOW
     fun test_e2e_place_postonly_order_failed(
         user1: &signer,
         user2: &signer,
@@ -2376,7 +2376,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    #[expected_failure(abort_code = 0x10D)] // E_PRICE_TOO_HIGH
+    #[expected_failure(abort_code = E_PRICE_TOO_HIGH)] // E_PRICE_TOO_HIGH
     fun test_e2e_place_postonly_order_failed2(
         user1: &signer,
         user2: &signer,
@@ -2709,7 +2709,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    #[expected_failure(abort_code = 0x113)]
+    #[expected_failure(abort_code = E_LOT_SIZE)]
     fun test_place_invalid_order_qty(
         user1: &signer,
         user2: &signer,
@@ -2724,7 +2724,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    #[expected_failure(abort_code = 0x113)]
+    #[expected_failure(abort_code = E_LOT_SIZE)]
     fun test_place_invalid_order_sell_qty(
         user1: &signer,
         user2: &signer,
@@ -2739,7 +2739,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    #[expected_failure(abort_code = 0x107)]
+    #[expected_failure(abort_code = E_PAIR_PRICE_INVALID)]
     fun test_place_invalid_order_price(
         user1: &signer,
         user2: &signer,
@@ -2784,7 +2784,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    #[expected_failure(abort_code = 0x114)]
+    #[expected_failure(abort_code = E_MIN_NOTIONAL)]
     fun test_place_invalid_order_min_notional(
         user1: &signer,
         user2: &signer,
@@ -3523,7 +3523,7 @@ module sea::market {
         user2 = @user_2,
         user3 = @user_3
     )]
-    #[expected_failure(abort_code = 0x100)]
+    #[expected_failure(abort_code = E_NO_AUTH)]
     fun test_withdraw_pair_fee_failed(
         user1: &signer,
         user2: &signer,

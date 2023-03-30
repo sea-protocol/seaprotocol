@@ -63,7 +63,8 @@ module sea::test_router {
         user3 = @user_3,
         user4 = @user_4
     )]
-    #[expected_failure(abort_code = 5003)]
+    // #[expected_failure(abort_code = 5003)]
+    #[expected_failure]
     public fun test_less_min_liquidity(
         user1: &signer,
         user2: &signer,

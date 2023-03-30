@@ -9,4 +9,5 @@ sealib = "0x7587a895cddb80d22b248603408f460acbdb901c733e01750ab88c71886fc7e6" # 
 git = "https://github.com/aptos-labs/aptos-core.git"
 subdir = "aptos-move/framework/aptos-framework"
 # rev = "563e2abff8fa997aec81abe48772af8a20731f76"
-rev = "main"
+# rev = "main"
+rev = "1.0.4"

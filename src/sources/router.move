@@ -12,7 +12,7 @@
 module sea::router {
     use std::signer::address_of;
     use std::vector;
-    // use std::debug;
+    use std::debug;
     use aptos_framework::coin::{Self, Coin};
 
     use sea_spot::lp::{LP};
@@ -138,6 +138,10 @@ module sea::router {
         let coins = coin::withdraw<LP<B, Q>>(account, liquidity);
         let (base_out, quote_out) = amm::burn<B, Q>(coins);
 
+        debug::print(&coin::supply<LP<B, Q>>());
+        debug::print(&liquidity);
+        debug::print(&base_out);
+        debug::print(&quote_out);
         assert!(coin::value(&base_out) >= amt_base_min, E_INSUFFICIENT_BASE_AMOUNT);
         assert!(coin::value(&quote_out) >= amt_quote_min, E_INSUFFICIENT_QUOTE_AMOUNT);
 
@@ -242,7 +246,8 @@ module sea::router {
         let (base_reserve, quote_reserve, amm_fee_ratio) = amm::get_pool_reserve_fee_u128<B, Q>();
         let (price_ratio, _, lot_size) = market::get_pair_info_u128<B, Q>();
         // assert!(base_reserve > 0 && quote_reserve > 0, E_EMPTY_POOL);
-        if (base_reserve == 0 || quote_reserve == 0) {
+        let min_liq = (amm::get_min_liquidity() as u128);
+        if (base_reserve == 0 || quote_reserve == 0 || base_reserve * quote_reserve < min_liq * min_liq) {
             // no amm
             return get_all_step_qty(&steps, qty, (price_ratio as u64))
         };
@@ -1209,6 +1214,22 @@ module sea::router {
         // add some liquid
         add_liquidity<market::T_BTC, market::T_USD>(user1, 100000000, 100000000 * 15120, 0, 0);
         add_liquidity<market::T_BTC, market::T_USD>(user1, 200000000, 200000000 * 15120, 0, 0);
+        let (amm_base_qty, amm_quote_vol, ob_base_qty, ob_quote_vol) = 
+            calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000);
+
+        debug::print(&amm_base_qty);
+        debug::print(&amm_quote_vol);
+        debug::print(&ob_base_qty);
+        debug::print(&ob_quote_vol);
+
+        let lp_balance = coin::balance<LP<market::T_BTC, market::T_USD>>(address_of(user1));
+        debug::print(&lp_balance);
+        // total suply: 2379936758
+        // lp_balance:  36889019757
+        //              36889022757.45455
+        // 281818181
+        // 300000000
+        remove_liquidity<market::T_BTC, market::T_USD>(user1, lp_balance, 300000000-1000, 300000000 * 15120-1000);
         let (amm_base_qty, amm_quote_vol, ob_base_qty, ob_quote_vol) = 
             calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000);
 

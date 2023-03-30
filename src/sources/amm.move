@@ -10,7 +10,7 @@
 /// AMM
 /// 
 module sea::amm {
-    // use std::debug;
+    use std::debug;
     use std::option;
     use std::signer::address_of;
     use std::string::{Self, String};
@@ -272,6 +272,10 @@ module sea::amm {
         let total_supply = option::extract(&mut coin::supply<LP<B, Q>>());
         let base_reserve = coin::value(&pool.base_reserve);
         let quote_reserve = coin::value(&pool.quote_reserve);
+
+        debug::print(&total_supply);
+        debug::print(&base_reserve);
+        debug::print(&quote_reserve);
 
         // how much base and quote to be returned
         let base_to_return_val = (((burn_vol as u128) * (base_reserve as u128) / total_supply) as u64);
