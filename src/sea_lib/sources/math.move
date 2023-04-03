@@ -54,6 +54,25 @@ module sealib::math {
             (z as u64)
         }
     }
+
+    public fun sqrt_u128(y: u128): u128 {
+        if (y < 4) {
+            if (y == 0) {
+                0u128
+            } else {
+                1u128
+            }
+        } else {
+            let z = y;
+            let x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            };
+            z
+        }
+    }
+
     // Check if mul maybe overflow
     // The result maybe false positive
     public fun is_overflow_mul(a: u128, b: u128): bool {

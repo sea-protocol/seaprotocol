@@ -895,7 +895,7 @@ module sea::market {
         side: u8,
         price: u64,
         order: OrderEntity<B, Q>,
-        ): u128 acquires Pair {
+    ): u128 acquires Pair {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
 
         assert!(!pair.paused, E_PAIR_PAUSED);
@@ -927,6 +927,18 @@ module sea::market {
         pair.last_timestamp = timestamp::now_seconds();
 
         place_order(side, price, pair, order)
+    }
+
+    public fun new_price_step(
+        qty: u64,
+        price: u64,
+        orders: u64
+    ): PriceStep {
+        PriceStep{
+            qty: qty,
+            price: price,
+            orders: orders,
+        }
     }
 
     // Private functions ====================================================

@@ -40,16 +40,17 @@ module sea::router {
     const E_INSUFFICIENT_AMOUNT_OUT:              u64 = 7009;
     const E_NON_ZERO_COIN:                        u64 = 7010;
     const E_EMPTY_POOL:                           u64 = 7011;
+    const E_INVALID_CLAC_QTY:                     u64 = 7012;
 
     // hybrid swap
     public entry fun hybrid_swap_entry<B, Q>(
         account: &signer,
         side: u8,
         amm_base_qty: u64,  // buy: this is amm base out; sell: is is amm base in
-        amm_quote_vol: u64,  // buy: this is quote in; sell: this is amm quote out
+        amm_quote_vol: u64, // buy: this is quote in; sell: this is amm quote out
         ob_base_qty: u64,   // order book base qty
-        ob_quote_vol: u64,   // order book quote qty
-        slip_out: u64, // slippage min out quote volume
+        ob_quote_vol: u64,  // order book quote qty
+        min_out: u64,       // slippage min out quote volume
     ) {
         let addr = address_of(account);
 
@@ -76,32 +77,18 @@ module sea::router {
         };
 
         if (side == BUY) {
-            // debug::print(&coin::value(&base_out));
             // taker got base
-            assert!(coin::value(&base_out) >= slip_out, E_INSUFFICIENT_AMOUNT_OUT);
+            assert!(coin::value(&base_out) >= min_out, E_INSUFFICIENT_AMOUNT_OUT);
             utils::register_coin_if_not_exist<B>(account);
         } else {
-            // debug::print(&coin::value(&quote_out));
             // taker got quote
-            assert!(coin::value(&quote_out) >= slip_out, E_INSUFFICIENT_AMOUNT_OUT);
+            assert!(coin::value(&quote_out) >= min_out, E_INSUFFICIENT_AMOUNT_OUT);
             utils::register_coin_if_not_exist<Q>(account);
         };
 
         let addr = address_of(account);
         coin::deposit(addr, base_out);
         coin::deposit(addr, quote_out);
-    }
-
-    // hybrid swap
-    public entry fun hybrid_swap_auto_entry<B, Q>(
-        account: &signer,
-        side: u8,
-        qty: u64,  // if side is BUY, this is quote amount; if side is SELL, this is base amoount
-        slip_out: u64, // slippage min out quote volume
-    ) {
-        let (amm_base_qty, amm_quote_qty, ob_base_qty, ob_quote_vol) = calc_hybrid_partial<B, Q>(side, qty);
-
-        hybrid_swap_entry<B, Q>(account, side, amm_base_qty, amm_quote_qty, ob_base_qty, ob_quote_vol,slip_out);
     }
 
     public entry fun add_liquidity<B, Q>(
@@ -138,10 +125,6 @@ module sea::router {
         let coins = coin::withdraw<LP<B, Q>>(account, liquidity);
         let (base_out, quote_out) = amm::burn<B, Q>(coins);
 
-        debug::print(&coin::supply<LP<B, Q>>());
-        debug::print(&liquidity);
-        debug::print(&base_out);
-        debug::print(&quote_out);
         assert!(coin::value(&base_out) >= amt_base_min, E_INSUFFICIENT_BASE_AMOUNT);
         assert!(coin::value(&quote_out) >= amt_quote_min, E_INSUFFICIENT_QUOTE_AMOUNT);
 
@@ -223,19 +206,66 @@ module sea::router {
         coin::transfer<LP<B, Q>>(&escrow::get_spot_account(), to, amount);
     }
 
+    // hybrid swap
+    public entry fun hybrid_swap_auto_entry<B, Q>(
+        account: &signer,
+        side: u8,
+        qty: u64,     // if side is BUY, this is quote amount; if side is SELL, this is base amoount
+        min_out: u64, // slippage min out quote volume
+    ) {
+        let steps = market::get_pair_side_steps<B, Q>(SIDE_ALL - side);
+        let (base_reserve, quote_reserve, amm_fee_ratio) = amm::get_pool_reserve_fee_u128<B, Q>();
+        let (
+            amm_base_qty,
+            amm_quote_qty,
+            ob_base_qty,
+            ob_quote_vol
+        ) = calc_hybrid_partial<B, Q>(side, qty, base_reserve, quote_reserve, amm_fee_ratio, &steps);
+
+        hybrid_swap_entry<B, Q>(account, side, amm_base_qty, amm_quote_qty, ob_base_qty, ob_quote_vol, min_out);
+    }
+
     ////////////////////////////////////////////////////////////////////////////
     /// PUBLIC FUNCTIONS
     ////////////////////////////////////////////////////////////////////////////
     
+    // calc how many amm_qty, ob_qty under price
+    // amm_base_qty amm_quote_vol ob_base_qty ob_quote_vol
+    public fun calc_hybrid_qty_under_price<B, Q>(
+        _side: u8,
+        _price: u64,
+    ) {
+
+    }
+
     // use orderbook match price better than amm, until end
+    // side: the taker side
+    // qty: qty the taker want to sell/buy
     // return: amm_base_qty amm_quote_vol ob_base_qty ob_quote_vol
-    public fun calc_hybrid_partial<B, Q>(
+    public fun calc_pair_hybrid_partial<B, Q>(
         side: u8,
         qty: u64,
     ): (u64, u64, u64, u64) {
         let steps = market::get_pair_side_steps<B, Q>(SIDE_ALL - side);
+        let (base_reserve, quote_reserve, amm_fee_ratio) = amm::get_pool_reserve_fee_u128<B, Q>();
+
+        calc_hybrid_partial<B, Q>(side, qty, base_reserve, quote_reserve, amm_fee_ratio, &steps)
+    }
+
+    // use orderbook match price better than amm, until end
+    // side: the taker side
+    // qty: qty the taker want to sell/buy
+    // return: amm_base_qty amm_quote_vol ob_base_qty ob_quote_vol
+    public fun calc_hybrid_partial<B, Q>(
+        side: u8,
+        qty: u64,
+        base_reserve: u128,
+        quote_reserve: u128,
+        amm_fee_ratio: u128,
+        steps: &vector<market::PriceStep>,
+    ): (u64, u64, u64, u64) {
         // first, check the orderbook's price is 
-        if (vector::length(&steps) == 0) {
+        if (vector::length(steps) == 0) {
             // all use amm
             if (side == BUY) {
                 return (get_amount_out<B, Q>(qty, false), qty, 0, 0)
@@ -243,23 +273,24 @@ module sea::router {
                 return (qty, get_amount_out<B, Q>(qty, true), 0, 0)
             }
         };
-        let (base_reserve, quote_reserve, amm_fee_ratio) = amm::get_pool_reserve_fee_u128<B, Q>();
+
         let (price_ratio, _, lot_size) = market::get_pair_info_u128<B, Q>();
         // assert!(base_reserve > 0 && quote_reserve > 0, E_EMPTY_POOL);
         let min_liq = (amm::get_min_liquidity() as u128);
         if (base_reserve == 0 || quote_reserve == 0 || base_reserve * quote_reserve < min_liq * min_liq) {
             // no amm
-            return get_all_step_qty(&steps, qty, (price_ratio as u64))
+            return get_all_step_qty(steps, qty, (price_ratio as u64))
         };
 
         let amm_fee_deno = (fee::get_fee_denominate() as u128);
-
         let i = 0;
-        let ob_base_qty = 0;
-        let ob_quote_vol = 0;
+        let ob_base_qty = 0u128;
+        let ob_quote_vol = 0u128;
+        let amm_base_qty = 0u128;
+        let amm_quote_vol = 0u128;
         let qty_u128 = (qty as u128);
-        let amm_best_price: u128 = base_reserve * price_ratio / quote_reserve;
-        let (amm_base_qty, amm_quote_vol, amm_worst_price) = get_amm_price(
+        let amm_best_price: u128 = quote_reserve * price_ratio / base_reserve;
+        let (_, _, amm_worst_price) = get_amm_price(
             side,
             qty_u128,
             price_ratio,
@@ -269,37 +300,36 @@ module sea::router {
             amm_fee_deno,
         );
 
-        while(i < vector::length(&steps)) {
-            let step = vector::borrow(&steps, i);
+        while(i < vector::length(steps)) {
+            let step = vector::borrow(steps, i);
             let (step_price, step_qty) = market::get_price_step_u128(step);
-            // if step_qty 
-            let step_quote = utils::calc_quote_qty_u128(step_qty, step_price, price_ratio);
+
             if (side == BUY) {
-                if (step_price >= amm_worst_price) {
-                    break
+                if (step_price < amm_worst_price) {
+                    if (step_qty + ob_base_qty >= qty_u128)
+                        step_qty = (qty_u128 - ob_base_qty) / lot_size * lot_size;
+                    if (step_price < amm_best_price) {
+                        i = i + 1;
+                        ob_base_qty = ob_base_qty + step_qty;
+                        ob_quote_vol = ob_quote_vol + utils::calc_quote_qty_u128(step_qty, step_price, price_ratio);
+                        continue
+                    };
                 };
-                if (step_price < amm_best_price) {
-                    i = i + 1;
-                    ob_base_qty = ob_base_qty + step_qty;
-                    ob_quote_vol = ob_quote_vol + step_quote;
-                    continue
-                };
-                if (ob_quote_vol + step_quote >= qty_u128) 
-                    step_qty = (qty_u128 - ob_quote_vol) / lot_size * lot_size;
             } else if (side == SELL) {
-                if (step_price <= amm_worst_price) {
-                    break
+                if (step_price > amm_worst_price) {
+                    if (step_qty + ob_base_qty >= qty_u128)
+                        step_qty = (qty_u128 - ob_base_qty) / lot_size * lot_size;
+                    if (step_price >= amm_best_price) {
+                        i = i + 1;
+                        ob_base_qty = ob_base_qty + step_qty;
+                        ob_quote_vol = ob_quote_vol + utils::calc_quote_qty_u128(step_qty, step_price, price_ratio);
+                        continue
+                    };
                 };
-                if (step_price > amm_best_price) {
-                    i = i + 1;
-                    ob_base_qty = ob_base_qty + step_qty;
-                    ob_quote_vol = ob_quote_vol + step_quote;
-                    continue
-                };
-                if (step_qty + ob_base_qty >= qty_u128)
-                    step_qty = (qty_u128 - ob_quote_vol) / lot_size * lot_size;
             };
-            if (step_qty == 0) break;
+
+            if (ob_base_qty == qty_u128) break;
+            // if (step_qty == 0) break;
             // step_quote = utils::calc_quote_qty_u128(step_qty, (step_price as u128), price_ratio);
 
             let step_base_qty;
@@ -321,10 +351,15 @@ module sea::router {
             ob_quote_vol = ob_quote_vol + step_quote_vol;
             i = i + 1;
         };
-
+        debug::print(&33333333333);
+        debug::print(&amm_base_qty);
+        debug::print(&ob_base_qty);
+        assert!(amm_base_qty + ob_base_qty == qty_u128, E_INVALID_CLAC_QTY);
         ((amm_base_qty as u64), (amm_quote_vol as u64), (ob_base_qty as u64), (ob_quote_vol as u64))
     }
 
+    // side: swap side
+    // qty: base qty
     public fun get_amm_price(
         side: u8,
         qty: u128,
@@ -336,8 +371,8 @@ module sea::router {
     ): (u128, u128, u128) {
         let amount_in_with_fee = qty * (fee_deno - fee_ratio);
         if (side == SELL) {
-            let numerator = amount_in_with_fee * base_reserve;
-            let denominator = quote_reserve * fee_deno + amount_in_with_fee;
+            let numerator = amount_in_with_fee * (qty + base_reserve);
+            let denominator = quote_reserve * fee_deno - amount_in_with_fee;
             let base_out = numerator / denominator;
             (base_out, qty, ((qty * price_ratio) / base_out))
         } else {
@@ -395,7 +430,6 @@ module sea::router {
         let amm_quote_vol: u128;
         let amm_step_price: u128;
         let step_quote_vol: u128;
-        // let complete = false;
 
         loop {
             if (side == BUY) {
@@ -530,7 +564,9 @@ module sea::router {
     ): u64 {
         assert!(amount_in > 0, E_INVALID_AMOUNT_IN);
         let (base_reserve, quote_reserve, fee_ratio) = amm::get_pool_reserve_fee<B, Q>();
-        assert!(base_reserve > 0 && quote_reserve > 0, E_INSUFFICIENT_LIQUIDITY);
+        if (base_reserve  == 0 || quote_reserve == 0) {
+            return 0
+        };
 
         let fee_deno = fee::get_fee_denominate();
         let amount_in_with_fee = (amount_in as u128) * ((fee_deno - fee_ratio) as u128);
@@ -549,6 +585,34 @@ module sea::router {
         (amount_out as u64)
     }
 
+    // Tests ==================================================================
+    // #[test_only]
+    // use std::debug;
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_remove_liquidity(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+        // add_liquidity<market::T_BTC, market::T_USD>(user1, 300000, 300000 * 15120, 0, 0);
+
+        let addr1 = address_of(user1);
+        let lp_balance = coin::balance<LP<market::T_BTC, market::T_USD>>(addr1);
+        debug::print(&lp_balance);
+        remove_liquidity<market::T_BTC, market::T_USD>(user1, lp_balance, 0, 0);
+
+        debug::print(&coin::balance<market::T_BTC>(addr1));
+        debug::print(&coin::balance<market::T_USD>(addr1));
+    }
 
     #[test(
         user1 = @user_1,
@@ -929,7 +993,7 @@ module sea::router {
             0,
             0,
         );
-            // quote_out+(120000-120000*5/10000)*15120);
+        // quote_out+(120000-120000*5/10000)*15120);
         // debug::print(&quote_out);
         // sell
         let (base_out, quote_out) = hybrid_swap<market::T_BTC, market::T_USD>(
@@ -1151,7 +1215,7 @@ module sea::router {
 
     // alloc hybrid swap
 
-    // all use orderbook
+    // partial use orderbook
     #[test(
         user1 = @user_1,
         user2 = @user_2,
@@ -1162,15 +1226,12 @@ module sea::router {
         user2: &signer,
         user3: &signer,
     ) {
-        use std::debug;
-
         market::test_register_pair(user1, user2, user3);
-
         // 
         let addr2 = address_of(user2);
         let account_id2 = escrow::get_or_register_account_id(addr2);
         let o1 = market::do_place_postonly_order<market::T_BTC, market::T_USD>(
-            1, // buy
+            BUY, // buy
             15120 * 1000000000,
             market::build_order<market::T_BTC, market::T_USD>(
                 account_id2,
@@ -1181,7 +1242,7 @@ module sea::router {
             ),
         );
         let o2 = market::do_place_postonly_order<market::T_BTC, market::T_USD>(
-            1, // buy
+            BUY, // buy
             15110 * 1000000000,
             market::build_order<market::T_BTC, market::T_USD>(
                 account_id2,
@@ -1192,7 +1253,7 @@ module sea::router {
             ),
         );
         let o3 = market::do_place_postonly_order<market::T_BTC, market::T_USD>(
-            1, // buy
+            BUY, // buy
             15100 * 1000000000,
             market::build_order<market::T_BTC, market::T_USD>(
                 account_id2,
@@ -1203,51 +1264,86 @@ module sea::router {
             ),
         );
 
+        let steps = market::get_pair_side_steps<market::T_BTC, market::T_USD>(BUY);
+        let (base_reserve, quote_reserve, amm_fee_ratio) = amm::get_pool_reserve_fee_u128<market::T_BTC, market::T_USD>();
         let (amm_base_qty, amm_quote_vol, ob_base_qty, ob_quote_vol) = 
-            calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000);
-
-        debug::print(&amm_base_qty);
-        debug::print(&amm_quote_vol);
-        debug::print(&ob_base_qty);
-        debug::print(&ob_quote_vol);
+            calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000, base_reserve, quote_reserve, amm_fee_ratio, &steps);
+        assert!(amm_base_qty == 0, 1);
+        assert!(amm_quote_vol == 0, 1);
+        assert!(ob_base_qty == 100000000, 1);
+        // debug::print(&ob_quote_vol);
+        assert!(ob_quote_vol == 15120 * 100000000, 1);
 
         // add some liquid
         add_liquidity<market::T_BTC, market::T_USD>(user1, 100000000, 100000000 * 15120, 0, 0);
         add_liquidity<market::T_BTC, market::T_USD>(user1, 200000000, 200000000 * 15120, 0, 0);
+        let steps = market::get_pair_side_steps<market::T_BTC, market::T_USD>(BUY);
+        let (base_reserve, quote_reserve, amm_fee_ratio) = amm::get_pool_reserve_fee_u128<market::T_BTC, market::T_USD>();
         let (amm_base_qty, amm_quote_vol, ob_base_qty, ob_quote_vol) = 
-            calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000);
+            calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000, base_reserve, quote_reserve, amm_fee_ratio, &steps);
 
-        debug::print(&amm_base_qty);
-        debug::print(&amm_quote_vol);
-        debug::print(&ob_base_qty);
-        debug::print(&ob_quote_vol);
+        assert!(amm_base_qty == 0, 1);
+        assert!(amm_quote_vol == 0, 1);
+        assert!(ob_base_qty == 100000000, 1);
+        assert!(ob_quote_vol == 15120 * 100000000, 1);
 
         let lp_balance = coin::balance<LP<market::T_BTC, market::T_USD>>(address_of(user1));
-        debug::print(&lp_balance);
+        // debug::print(&lp_balance);
         // total suply: 2379936758
         // lp_balance:  36889019757
         //              36889022757.45455
         // 281818181
         // 300000000
         remove_liquidity<market::T_BTC, market::T_USD>(user1, lp_balance, 300000000-1000, 300000000 * 15120-1000);
+        let steps = market::get_pair_side_steps<market::T_BTC, market::T_USD>(BUY);
+        let (base_reserve, quote_reserve, amm_fee_ratio) = amm::get_pool_reserve_fee_u128<market::T_BTC, market::T_USD>();
         let (amm_base_qty, amm_quote_vol, ob_base_qty, ob_quote_vol) = 
-            calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000);
+            calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000, base_reserve, quote_reserve, amm_fee_ratio, &steps);
 
-        debug::print(&amm_base_qty);
-        debug::print(&amm_quote_vol);
-        debug::print(&ob_base_qty);
-        debug::print(&ob_quote_vol);
+        assert!(amm_base_qty == 0, 1);
+        assert!(amm_quote_vol == 0, 1);
+        assert!(ob_base_qty == 100000000, 1);
+        assert!(ob_quote_vol == 15120 * 100000000, 1);
 
         market::cancel_order<market::T_BTC, market::T_USD>(user2, 1, o1);
         market::cancel_order<market::T_BTC, market::T_USD>(user2, 1, o2);
         market::cancel_order<market::T_BTC, market::T_USD>(user2, 1, o3);
+        // 100000000
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 100000000, 100000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 200000000, 200000000 * 15120, 0, 0);
+        let (base_reserve, quote_reserve, amm_fee_ratio) = amm::get_pool_reserve_fee_u128<market::T_BTC, market::T_USD>();
         let (amm_base_qty, amm_quote_vol, ob_base_qty, ob_quote_vol) = 
-            calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000);
+            calc_hybrid_partial<market::T_BTC, market::T_USD>(SELL, 100000000, base_reserve, quote_reserve, amm_fee_ratio,
+                &vector::empty<market::PriceStep>());
 
-        debug::print(&amm_base_qty);
-        debug::print(&amm_quote_vol);
-        debug::print(&ob_base_qty);
-        debug::print(&ob_quote_vol);
+        assert!(amm_base_qty == 100000000, 1);
+        assert!(amm_quote_vol == 1133574696837, 1);
+        assert!(ob_base_qty == 0, 1);
+        assert!(ob_quote_vol == 0, 1);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_calc_hybrid_swap_sell_2(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+        let steps = vector::empty<market::PriceStep>();
+        let price_ratio = 1000000000;
+        vector::push_back(&mut steps, market::new_price_step(1000000000, 27038*price_ratio, 1));
+        vector::push_back(&mut steps, market::new_price_step(1100000000, 27040*price_ratio, 2));
+        vector::push_back(&mut steps, market::new_price_step(1200000000, 27042*price_ratio, 3));
+        vector::push_back(&mut steps, market::new_price_step(1300000000, 27043*price_ratio, 4));
+        vector::push_back(&mut steps, market::new_price_step(1400000000, 27046*price_ratio, 3));
+        vector::push_back(&mut steps, market::new_price_step(1300000000, 27050*price_ratio, 2));
+        vector::push_back(&mut steps, market::new_price_step(1200000000, 27051*price_ratio, 5));
+        vector::push_back(&mut steps, market::new_price_step(1100000000, 27052*price_ratio, 8));
+        vector::push_back(&mut steps, market::new_price_step(1000000000, 27060*price_ratio, 1));
     }
 
     #[test(

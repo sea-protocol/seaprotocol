@@ -726,9 +726,6 @@ module sealib::rbtree {
         // let tmp: &RBNode<V> = node;
         loop {
             let left_right = get_node(nodes, pos).left_right;
-            // debug::print(&444444444);
-            // debug::print(&pos);
-            // debug::print(&left_right);
             let left = get_left_index(left_right);
             // debug::print(&left);
             if (left == 0) {
@@ -944,7 +941,6 @@ module sealib::rbtree {
         let nodes = &mut tree.nodes;
         let y_left_pos = get_left_index(get_node_mut(nodes, y_pos).left_right);
 
-        // debug::print(&10000000000000);
         // debug::print(&px_pos);
         if (y_left_pos != 0) {
             let ly: &mut RBNode<V> = get_node_mut(nodes, y_left_pos);
@@ -1020,7 +1016,6 @@ module sealib::rbtree {
         let y = get_node_mut(nodes, y_pos);
         set_node_left(y, x_right_pos);
         set_node_parent(y, x_pos);
-        // debug::print(&200000000000000);
         // debug::print(&y_pos);
         // debug::print(&x_right_pos);
     }
@@ -1134,7 +1129,6 @@ module sealib::rbtree {
         let right_pos = get_right_index(node.left_right);
 
         if (right_pos > 0) {
-            // debug::print(&3333333666);
             return get_node_least_pos(&tree.nodes, right_pos)
         } else {
             let parent_pos = get_parent_index(node.color_parent);
@@ -1189,7 +1183,6 @@ module sealib::rbtree {
         let pos = tree.leftmost;
         let nodes = 1;
     
-        // debug::print(&111111111111);
         // debug::print(&pos);
         if (print) {
             // let s: address = @0x111111111;
@@ -1312,7 +1305,6 @@ module sealib::rbtree {
         let nodes = validate_tree(&tree, false);
         assert!(length(&tree) == nodes, 600);
 
-        // debug::print(&1600);
         rb_insert<u64>(&mut tree, 1600, 1600);
         // assert!(tree.root == 1, 1);
         // assert!(tree.root == 3, 3);
@@ -1320,7 +1312,6 @@ module sealib::rbtree {
         let nodes = validate_tree(&tree, false);
         assert!(length(&tree) == nodes, 1600);
 
-        // debug::print(&2000);
         rb_insert<u64>(&mut tree, 2000, 2000);
         assert!(tree.leftmost == 2, 2);
         let nodes = validate_tree(&tree, false);

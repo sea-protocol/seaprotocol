@@ -10,7 +10,6 @@
 /// AMM
 /// 
 module sea::amm {
-    use std::debug;
     use std::option;
     use std::signer::address_of;
     use std::string::{Self, String};
@@ -253,7 +252,8 @@ module sea::amm {
 
         let lp = coin::mint<LP<B, Q>>(liquidity, &pool.lp_mint_cap);
         update_pool(pool, base_reserve, quote_reserve);
-        pool.k_last = (base_reserve as u128) * (quote_reserve as u128);
+        // here should update k_last to last reserve
+        pool.k_last = (coin::value(&pool.base_reserve) as u128) * (coin::value(&pool.quote_reserve) as u128);
 
         lp
     }
@@ -273,9 +273,9 @@ module sea::amm {
         let base_reserve = coin::value(&pool.base_reserve);
         let quote_reserve = coin::value(&pool.quote_reserve);
 
-        debug::print(&total_supply);
-        debug::print(&base_reserve);
-        debug::print(&quote_reserve);
+        // debug::print(&total_supply);
+        // debug::print(&base_reserve);
+        // debug::print(&quote_reserve);
 
         // how much base and quote to be returned
         let base_to_return_val = (((burn_vol as u128) * (base_reserve as u128) / total_supply) as u64);
@@ -287,6 +287,7 @@ module sea::amm {
         let quote_coin_to_return = coin::extract(&mut pool.quote_reserve, quote_to_return_val);
 
         update_pool<B, Q>(pool, base_reserve, quote_reserve);
+        pool.k_last = (base_reserve as u128) * (quote_reserve as u128);
         coin::burn(lp, &pool.lp_burn_cap);
 
         (base_coin_to_return, quote_coin_to_return)
@@ -558,25 +559,25 @@ module sea::amm {
     fun mint_fee<B, Q>(
         pool: &mut Pool<B, Q>,
     ) acquires AMMConfig {
-        let dao_fee = borrow_global<AMMConfig>(@sea).dao_fee;
+        let dao_fee = (borrow_global<AMMConfig>(@sea).dao_fee as u128);
         let k_last = pool.k_last;
         let base_reserve = coin::value(&pool.base_reserve);
         let quote_reserve = coin::value(&pool.quote_reserve);
 
         if (k_last != 0) {
-            let root_k = math::sqrt((base_reserve as u128) * (quote_reserve as u128));
-            let root_k_last = math::sqrt(k_last);
+            let root_k = math::sqrt_u128((base_reserve as u128) * (quote_reserve as u128));
+            let root_k_last = math::sqrt_u128(k_last);
             let total_supply = option::extract(&mut coin::supply<LP<B, Q>>());
             if (root_k > root_k_last) {
-                let delta_k = ((root_k - root_k_last) as u128);
+                let delta_k = (root_k - root_k_last);
                 let liquidity;
                 if (math::is_overflow_mul(total_supply, delta_k)) {
                     let numerator = u256::mul(u256::from_u128(total_supply), u256::from_u128(delta_k));
-                    let denominator = u256::from_u128((root_k as u128) * (dao_fee as u128) + (root_k_last as u128));
+                    let denominator = u256::from_u128(root_k * dao_fee + root_k_last);
                     liquidity = u256::as_u64(u256::div(numerator, denominator));
                 } else {
                     let numerator = total_supply * delta_k;
-                    let denominator = (root_k as u128) * (dao_fee as u128) + (root_k_last as u128);
+                    let denominator = root_k * dao_fee + root_k_last;
                     liquidity = ((numerator / denominator) as u64);
                 };
                 if (liquidity > 0) {
