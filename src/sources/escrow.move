@@ -23,6 +23,7 @@ module sea::escrow {
     friend sea::market;
     friend sea::amm;
     friend sea::router;
+    friend sea::aggregator;
 
     // Constants ====================================================
     const E_NO_AUTH:             u64 = 6000;
