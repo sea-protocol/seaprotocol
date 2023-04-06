@@ -228,16 +228,92 @@ module sea::router {
     // Tests ==================================================================
     #[test_only]
     use sea::market;
+    #[test_only]
+    use std::vector;
     // use std::debug;
 
-    #[test]
-    fun test_get_amount_in() {
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_get_amount_in(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+    ) {
+        market::test_register_pair(user1, user2, user3);
 
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let i = 0;
+        let out_bases = vector<u64>[10000000, 20000000, 50000000, 80000000, 160000000, 300000000, 600000000, 1100000000];
+        let exp_quotes = vector<u64>[151781576407, 304581821112, 769198158402, 1243361406731, 2556771343419, 5042521260631, 11345672836419, 26274189726443];
+        // buy exact base
+        while (i < vector::length(&out_bases)) {
+            let out_base: u64 = *vector::borrow(&out_bases, i);
+            let exp_quote = *vector::borrow(&exp_quotes, i);
+            let in_amt = get_amount_in<market::T_BTC, market::T_USD>(out_base, true);
+            assert!(in_amt == exp_quote, i);
+
+            i = i + 1;
+        };
+
+        i = 0;
+        // buy exact quote
+        let out_quotes = vector<u64>[1000000000, 2000000000, 5000000000, 8000000000, 16000000000, 30000000000, 60000000000, 110000000000];
+        let exp_bases = vector<u64>[66173, 132348, 330890, 529459, 1059105, 1986434, 3975498, 7296466];
+        while (i < vector::length(&out_quotes)) {
+            let out_quote: u64 = *vector::borrow(&out_quotes, i);
+            let exp_base = *vector::borrow(&exp_bases, i); // base to sell
+            let in_amt = get_amount_in<market::T_BTC, market::T_USD>(out_quote, false);
+            assert!(exp_base == in_amt, 1000 + i);
+
+            i = i + 1;
+        }
     }
 
-    #[test]
-    fun test_get_amount_out() {
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_get_amount_out(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer
+    ) {
+        market::test_register_pair(user1, user2, user3);
 
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let i = 0;
+        let in_bases = vector<u64>[10000000, 20000000, 50000000, 80000000, 160000000, 300000000, 600000000, 1100000000];
+        let exp_quotes = vector<u64>[150622575785, 300248146517, 743240846236, 1177608020883, 2295618623256, 4121761898268, 7556849737478, 12165303150422];
+        // sell exact base
+        while (i < vector::length(&in_bases)) {
+            let in_base: u64 = *vector::borrow(&in_bases, i);
+            let out_amt = get_amount_out<market::T_BTC, market::T_USD>(in_base, true);
+            let exp_quote = *vector::borrow(&exp_quotes, i);
+            assert!(out_amt == exp_quote, i);
+
+            i = i + 1;
+        };
+
+        i = 0;
+        // sell exact quote
+        let in_quotes = vector<u64>[1000000000, 2000000000, 5000000000, 8000000000, 16000000000, 30000000000, 60000000000, 110000000000];
+        let exp_bases = vector<u64>[66103, 132203, 330486, 528742, 1057299, 1981824, 3961032, 7253912];
+        while (i < vector::length(&in_quotes)) {
+            let in_quote: u64 = *vector::borrow(&in_quotes, i);
+            let out_amt = get_amount_out<market::T_BTC, market::T_USD>(in_quote, false);
+            let exp_base = *vector::borrow(&exp_bases, i); // out base expect
+            assert!(exp_base == out_amt, 1000 + i);
+
+            i = i + 1;
+        }
     }
 
     #[test(
