@@ -81,22 +81,22 @@ module sea::router {
         account: &signer,
         amount_out: u64,
         amount_in_max: u64
-        ) {
-        let coin_in_needed = get_amount_in<B, Q>(amount_out, false);
-        assert!(coin_in_needed <= amount_in_max, E_INSUFFICIENT_BASE_AMOUNT);
-        let coin_in = coin::withdraw<B>(account, coin_in_needed);
-        let coin_out;
-        coin_out = swap_base_for_quote<B, Q>(coin_in, amount_out);
+    ) {
+        let base_in_needed = get_amount_in<B, Q>(amount_out, false);
+        assert!(base_in_needed <= amount_in_max, E_INSUFFICIENT_BASE_AMOUNT);
+        let base_in = coin::withdraw<B>(account, base_in_needed);
+        let quote_out;
+        quote_out = swap_base_for_quote<B, Q>(base_in, amount_out);
         utils::register_coin_if_not_exist<Q>(account);
-        coin::deposit<Q>(address_of(account), coin_out);
+        coin::deposit<Q>(address_of(account), quote_out);
     }
 
-    // user: sell base
+    // user: sell exact base
     public entry fun sell_exact_base<B, Q>(
         account: &signer,
         amount_in: u64,
         amount_out_min: u64
-        ) {
+    ) {
         let coin_in = coin::withdraw<B>(account, amount_in);
         let coin_out;
         coin_out = swap_base_for_quote<B, Q>(coin_in, amount_out_min);
@@ -111,7 +111,7 @@ module sea::router {
         account: &signer,
         amount_out: u64,
         amount_in_max: u64
-        ) {
+    ) {
         let coin_in_needed = get_amount_in<B, Q>(amount_out, true);
         assert!(coin_in_needed <= amount_in_max, E_INSUFFICIENT_BASE_AMOUNT);
         let coin_in = coin::withdraw<Q>(account, coin_in_needed);
@@ -172,10 +172,10 @@ module sea::router {
         coin_out
     }
 
-    /// out_is_base: by user perspective
+    /// in_is_quote: by user perspective
     public fun get_amount_in<B, Q>(
         amount_out: u64,
-        out_is_base: bool,
+        in_is_quote: bool,
     ): u64 {
         assert!(amount_out > 0, E_INVALID_AMOUNT_OUT);
         let (base_reserve, quote_reserve, fee_ratio) = amm::get_pool_reserve_fee<B, Q>();
@@ -184,7 +184,7 @@ module sea::router {
         let numerator: u128;
         let denominator: u128;
         let fee_deno = fee::get_fee_denominate();
-        if (out_is_base) {
+        if (in_is_quote) {
             assert!(base_reserve > amount_out, E_INSUFFICIENT_BASE_RESERVE);
             numerator = (quote_reserve as u128) * (amount_out as u128) * (fee_deno as u128);
             denominator = ((base_reserve - amount_out) as u128) * ((fee_deno - fee_ratio) as u128);
@@ -314,6 +314,115 @@ module sea::router {
 
             i = i + 1;
         }
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_buy_exact_quote(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        let addr2 = address_of(user2);
+        let btc_balance1 = coin::balance<market::T_BTC>(addr2);
+        let usd_balance1 = coin::balance<market::T_USD>(addr2);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let amt_out = 1500000000000; // quote usdt
+        let amt_in_max = get_amount_in<market::T_BTC, market::T_USD>(amt_out, false);
+        buy_exact_quote<market::T_BTC, market::T_USD>(user2, amt_out, amt_in_max);
+        let btc_balance2 = coin::balance<market::T_BTC>(addr2);
+        let usd_balance2 = coin::balance<market::T_USD>(addr2);
+        assert!(btc_balance2 >= btc_balance1 - amt_in_max, 1);
+        assert!(usd_balance2 == usd_balance1 + amt_out, 2);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_sell_exact_base(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        let addr2 = address_of(user2);
+        let btc_balance1 = coin::balance<market::T_BTC>(addr2);
+        let usd_balance1 = coin::balance<market::T_USD>(addr2);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let amt_in = 15000000; // base btc
+        let amt_out_min = get_amount_out<market::T_BTC, market::T_USD>(amt_in, true);
+        sell_exact_base<market::T_BTC, market::T_USD>(user2, amt_in, amt_out_min);
+        let btc_balance2 = coin::balance<market::T_BTC>(addr2);
+        let usd_balance2 = coin::balance<market::T_USD>(addr2);
+        assert!(btc_balance2 == btc_balance1 - amt_in, 1);
+        assert!(usd_balance2 >= usd_balance1 + amt_out_min, 2);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_buy_exact_base(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        let addr2 = address_of(user2);
+        let btc_balance1 = coin::balance<market::T_BTC>(addr2);
+        let usd_balance1 = coin::balance<market::T_USD>(addr2);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let amt_out = 15000000; // base btc
+        let amt_in_max = get_amount_in<market::T_BTC, market::T_USD>(amt_out, true);
+        buy_exact_base<market::T_BTC, market::T_USD>(user2, amt_out, amt_in_max);
+        let btc_balance2 = coin::balance<market::T_BTC>(addr2);
+        let usd_balance2 = coin::balance<market::T_USD>(addr2);
+
+        assert!(btc_balance2 == btc_balance1 + amt_out, 1);
+        assert!(usd_balance2 >= usd_balance1 - amt_in_max, 2);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_sell_exact_quote(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        let addr2 = address_of(user2);
+        let btc_balance1 = coin::balance<market::T_BTC>(addr2);
+        let usd_balance1 = coin::balance<market::T_USD>(addr2);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let amt_in = 1500000000000; // quote usd
+        let amt_out_min = get_amount_out<market::T_BTC, market::T_USD>(amt_in, false);
+        sell_exact_quote<market::T_BTC, market::T_USD>(user2, amt_in, amt_out_min);
+        let btc_balance2 = coin::balance<market::T_BTC>(addr2);
+        let usd_balance2 = coin::balance<market::T_USD>(addr2);
+        assert!(btc_balance2 == btc_balance1 + amt_out_min, 1);
+        assert!(usd_balance2 == usd_balance1 - amt_in, 2);
     }
 
     #[test(
