@@ -447,4 +447,85 @@ module sea::router {
     }
 
     // flash loan
+
+    // loan base, return base
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_flash_loan_base_back_base(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let (coin_base, coin_quote, loan) = amm::flash_swap<market::T_BTC, market::T_USD>(100000000, 0);
+        coin::merge(&mut coin_base, coin::withdraw<market::T_BTC>(user2, 100000000 * 51 / 100000));
+        amm::pay_flash_swap<market::T_BTC, market::T_USD>(coin_base, coin_quote, loan);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_flash_loan_base_back_quote(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let (coin_base, coin_quote, loan) = amm::flash_swap<market::T_BTC, market::T_USD>(100000000, 0);
+        coin::merge(&mut coin_quote, coin::withdraw<market::T_USD>(user2, 100000000 * 15120 * 501 / 1000000));
+        amm::pay_flash_swap<market::T_BTC, market::T_USD>(coin_base, coin_quote, loan);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_flash_loan_quote_back_quote(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let (coin_base, coin_quote, loan) = amm::flash_swap<market::T_BTC, market::T_USD>(0, 100000000000);
+        coin::merge(&mut coin_quote, coin::withdraw<market::T_USD>(user2, 100000000000 * 501 / 1000000));
+        amm::pay_flash_swap<market::T_BTC, market::T_USD>(coin_base, coin_quote, loan);
+    }
+
+    #[test(
+        user1 = @user_1,
+        user2 = @user_2,
+        user3 = @user_3
+    )]
+    fun test_flash_loan_quote_back_base(
+        user1: &signer,
+        user2: &signer,
+        user3: &signer,
+    ) {
+        market::test_register_pair(user1, user2, user3);
+
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 1000000000, 1000000000 * 15120, 0, 0);
+        add_liquidity<market::T_BTC, market::T_USD>(user1, 2000000000, 2000000000 * 15120, 0, 0);
+
+        let (coin_base, coin_quote, loan) = amm::flash_swap<market::T_BTC, market::T_USD>(0, 100000000000);
+        coin::merge(&mut coin_base, coin::withdraw<market::T_BTC>(user2, 100000000000 * 501 / 15120 / 1000000));
+        amm::pay_flash_swap<market::T_BTC, market::T_USD>(coin_base, coin_quote, loan);
+    }
 }

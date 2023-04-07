@@ -464,24 +464,13 @@ module sea::amm {
         quote_reserve: u64,
         fee: u64,
     ) {
-        // debug::print(&base_balance);
-        // debug::print(&quote_balance);
-        // debug::print(&base_in);
-        // debug::print(&quote_in);
-        // debug::print(&base_reserve);
-        // debug::print(&quote_reserve);
-        // debug::print(&fee);
-
         let fee_deno = (fee::get_fee_denominate() as u128);
         // debug::print(&fee_deno);
         let base_balance_adjusted = (base_balance as u128) * fee_deno - (base_in as u128) * (fee as u128);
         let quote_balance_adjusted = (quote_balance as u128) * fee_deno - (quote_in as u128) * (fee as u128);
         let balance_k_old_not_scaled = (base_reserve as u128) * (quote_reserve as u128);
         let scale = fee_deno * fee_deno;
-        // debug::print(&base_balance_adjusted);
-        // debug::print(&quote_balance_adjusted);
-        // debug::print(&balance_k_old_not_scaled);
-        // debug::print(&scale);
+
         // should be: new_reserve_x * new_reserve_y > old_reserve_x * old_eserve_y
         // gas saving
         if (
