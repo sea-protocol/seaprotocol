@@ -18,7 +18,7 @@ aptos move publish --profile sealib --assume-yes
 
 echo 'deploy sea ....'
 cd ../
-aptos move publish --profile dev3 --assume-yes
+aptos move publish --profile dev3 --assume-yes --included-artifacts none
 
 
 echo 'deploy sea_mock ....'
