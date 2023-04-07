@@ -2109,6 +2109,7 @@ module sea::market {
         // 2. 
         register_pair<T_BTC, T_USD>(&sea_admin, 500, 1000000000, 10);
 
+        fee::modify_maker_port(&sea_admin, 400, 50);
         let pair = borrow_global_mut<Pair<T_BTC, T_USD>>(@sea_spot);
         pair.price_ratio
     }

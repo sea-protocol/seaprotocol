@@ -40,6 +40,7 @@ module sea::fee {
         assert!(address_of(sea_admin) == @sea, E_NO_AUTH);
 
         let fee: table::Table<u64, bool> = table::new();
+        table::add(&mut fee, 100, true);
         table::add(&mut fee, 200, true);
         table::add(&mut fee, 500, true);
         table::add(&mut fee, 1000, true);
@@ -48,8 +49,8 @@ module sea::fee {
             fee_levels: fee,
         });
         move_to(sea_admin, MakerProportion{
-            grid_proportion: 400,
-            order_proportion: 50,
+            grid_proportion: 600, // 400
+            order_proportion: 300, // 50
         })
     }
 
@@ -152,6 +153,7 @@ module sea::fee {
         sea_admin: &signer
     ) acquires MakerProportion {
         initialize(sea_admin);
+        modify_maker_port(sea_admin, 400, 50);
 
         let fee_fixtures = vector<vector<u64>>[
             vector<u64>[1, 0, 1, 0, 1],
