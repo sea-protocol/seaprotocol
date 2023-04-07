@@ -11,15 +11,14 @@
 /// 
 
 module sea::aggregator {
-    use std::debug;
-    use std::vector;
+    // use std::vector;
     use std::signer::address_of;
     use aptos_framework::coin::{Self, Coin};
     
-    use sea::amm;
+    // use sea::amm;
     use sea::market;
     use sea::utils;
-    use sea::fee;
+    // use sea::fee;
     use sea::router;
 
     const BUY:                u8   = 1;
@@ -81,6 +80,7 @@ module sea::aggregator {
         coin::deposit(addr, quote_out);
     }
 
+    /*
     // hybrid swap
     public entry fun hybrid_swap_auto_entry<B, Q>(
         account: &signer,
@@ -99,11 +99,13 @@ module sea::aggregator {
 
         hybrid_swap_entry<B, Q>(account, side, amm_base_qty, amm_quote_qty, ob_base_qty, ob_quote_vol, min_out);
     }
+    */
 
     ////////////////////////////////////////////////////////////////////////////
     /// PUBLIC FUNCTIONS
     ////////////////////////////////////////////////////////////////////////////
     
+    /*
     // calc how many amm_qty, ob_qty under price
     // amm_base_qty amm_quote_vol ob_base_qty ob_quote_vol
     public fun calc_hybrid_qty_under_price<B, Q>(
@@ -163,7 +165,8 @@ module sea::aggregator {
         let ob_quote_vol = 0u128;
         let amm_base_qty = 0u128;
         let amm_quote_vol = 0u128;
-        let qty_u128 = (qty as u128);
+        let qty_u128 = (qty as u128); // total base qty
+        let left_qty = (qty as u128);
         let amm_best_price: u128 = quote_reserve * price_ratio / base_reserve;
         let amm_worst_price = get_amm_price(
             side,
@@ -226,9 +229,7 @@ module sea::aggregator {
             ob_quote_vol = ob_quote_vol + step_quote_vol;
             i = i + 1;
         };
-        debug::print(&33333333333);
-        debug::print(&amm_base_qty);
-        debug::print(&ob_base_qty);
+
         assert!(amm_base_qty + ob_base_qty == qty_u128, E_INVALID_CLAC_QTY);
         ((amm_base_qty as u64), (amm_quote_vol as u64), (ob_base_qty as u64), (ob_quote_vol as u64))
     }
@@ -354,6 +355,7 @@ module sea::aggregator {
 
         (amm_base_qty, amm_quote_vol, step_base_qty, step_quote_vol)
     }
+    */
 
     public fun hybrid_swap<B, Q>(
         addr: address,
@@ -405,30 +407,10 @@ module sea::aggregator {
     use sea::escrow;
     #[test_only]
     use sea::router::add_liquidity;
-    #[test_only]
-    use sea_spot::lp::{LP};
+    // #[test_only]
+    // use sea_spot::lp::{LP};
     // #[test_only]
     // use std::debug;
-
-    #[test]
-    fun test_get_amm_price() {
-        use std::debug;
-
-        let qty: u128 = 100000;
-        let price_ratio: u128 = 1000000000;
-        let base_reserve: u128 = 1000000000;
-        let quote_reserve: u128 = 25000*1000000000;
-        let fee_ratio: u128 = 200;
-        let fee_deno: u128 = 1000000;
-
-        // buy
-        let buy_price = get_amm_price(BUY, qty, price_ratio, base_reserve, quote_reserve, fee_ratio, fee_deno);
-        // sell
-        let sell_price = get_amm_price(SELL, qty, price_ratio, base_reserve, quote_reserve, fee_ratio, fee_deno);
-
-        debug::print(&buy_price);
-        debug::print(&sell_price);
-    }
 
     #[test(
         user1 = @user_1,
@@ -1029,7 +1011,27 @@ module sea::aggregator {
         coin::deposit(addr3, quote_out);
     }
 
+    /*
     // alloc hybrid swap
+    #[test]
+    fun test_get_amm_price() {
+        use std::debug;
+
+        let qty: u128 = 100000;
+        let price_ratio: u128 = 1000000000;
+        let base_reserve: u128 = 1000000000;
+        let quote_reserve: u128 = 25000*1000000000;
+        let fee_ratio: u128 = 200;
+        let fee_deno: u128 = 1000000;
+
+        // buy
+        let buy_price = get_amm_price(BUY, qty, price_ratio, base_reserve, quote_reserve, fee_ratio, fee_deno);
+        // sell
+        let sell_price = get_amm_price(SELL, qty, price_ratio, base_reserve, quote_reserve, fee_ratio, fee_deno);
+
+        debug::print(&buy_price);
+        debug::print(&sell_price);
+    }
 
     // partial use orderbook
     #[test(
@@ -1237,5 +1239,5 @@ module sea::aggregator {
         market::test_register_pair(user1, user2, user3);
 
     }
-
+    */
 }

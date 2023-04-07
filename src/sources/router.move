@@ -443,11 +443,7 @@ module sea::router {
 
         let addr1 = address_of(user1);
         let lp_balance = coin::balance<LP<market::T_BTC, market::T_USD>>(addr1);
-        // debug::print(&lp_balance);
         remove_liquidity<market::T_BTC, market::T_USD>(user1, lp_balance, 0, 0);
-
-        // debug::print(&coin::balance<market::T_BTC>(addr1));
-        // debug::print(&coin::balance<market::T_USD>(addr1));
     }
 
     // flash loan
