@@ -77,7 +77,7 @@ module sea::escrow {
         move_to(sea_admin, SpotEscrowAccountCapability { signer_cap });
     }
 
-    public fun register_account(account: &signer): u64 acquires EscrowAccountAsset {
+    public entry fun register_account(account: &signer) acquires EscrowAccountAsset {
         let addr = address_of(account);
         let ref = borrow_global_mut<EscrowAccountAsset>(@sea);
         assert!(!table::contains<address, u64>(&ref.address_map, addr), E_ACCOUNT_REGISTERED);
@@ -87,8 +87,6 @@ module sea::escrow {
         table::add(&mut ref.account_map, account_id, addr);
 
         events::emit_account_event(account_id, addr);
-
-        account_id
     }
 
     /*

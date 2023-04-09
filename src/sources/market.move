@@ -515,7 +515,9 @@ module sea::market {
     // param: buy_orders: total buy orders
     // param: sell_orders: total sell orders
     // param: per_qty: the base qty of order
-    // param: delta_price: 
+    // param: delta_price_ratio: 
+    // param: arithmetic: grid flip algo, arithmetic or geo
+    // param: base_equal: if base equal, the grid flip base is equal; or else it use max quote
     public entry fun place_grid_order<B, Q>(
         account: &signer,
         buy_price0: u64,
