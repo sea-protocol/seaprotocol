@@ -436,7 +436,7 @@ module sea::market {
             side,
             qty,
             quote_qty,
-            escrow::get_or_register_account_id(account_addr),
+            escrow::get_account_id(account_addr),
             0,
         );
         // place_postonly_order_return_id<B, Q>(account, side, price, qty);
@@ -464,7 +464,7 @@ module sea::market {
             side,
             qty,
             quote_qty,
-            escrow::get_or_register_account_id(taker_addr),
+            escrow::get_account_id(taker_addr),
             0,
         );
 
@@ -480,19 +480,6 @@ module sea::market {
         };
     }
 
-    // public entry fun market_buy<B, Q>(
-    //     account: &signer,
-    //     quote_qty: u64,
-    // ) acquires Pair, AccountGrids {
-    //     // let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
-    //     let addr = address_of(account);
-    //     let account_id = escrow::get_or_register_account_id(addr);
-    //     let order = build_order<B, Q>(account_id, 0, 0, coin::zero(), coin::withdraw<Q>(account, quote_qty));
-
-    //     let (_, _, order_left) = match_order(addr, BUY, 0, order, true);
-    //     destroy_order(address_of(account), order_left);
-    // }
-
     public entry fun place_market_order<B, Q>(
         account: &signer,
         side: u8,
@@ -500,7 +487,7 @@ module sea::market {
     ) acquires Pair, AccountGrids {
         // let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         let addr = address_of(account);
-        let account_id = escrow::get_or_register_account_id(addr);
+        let account_id = escrow::get_account_id(addr);
         let order = if (side == SELL) 
             build_order<B, Q>(account_id, 0, qty, coin::withdraw<B>(account, qty), coin::zero())
         else
@@ -537,7 +524,7 @@ module sea::market {
         let account_addr = address_of(account);
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         assert!(!pair.paused, E_PAIR_PAUSED);
-        let account_id = escrow::get_or_register_account_id(account_addr);
+        let account_id = escrow::get_account_id(account_addr);
         let grid_id = pair.n_grid + 1;
 
         pair.n_grid = grid_id;
@@ -870,7 +857,7 @@ module sea::market {
             side,
             qty,
             quote_qty,
-            escrow::get_or_register_account_id(account_addr),
+            escrow::get_account_id(account_addr),
             0,
         );
         return do_place_postonly_order<B, Q>(side, price, order)
