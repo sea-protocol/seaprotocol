@@ -18,6 +18,7 @@ module sea::escrow {
     
     use sea::spot_account;
     use sea::events;
+    use sea::mining;
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     friend sea::market;
@@ -85,6 +86,9 @@ module sea::escrow {
         ref.n_account = account_id;
         table::add(&mut ref.address_map, addr, account_id);
         table::add(&mut ref.account_map, account_id, addr);
+
+        // user mining info
+        mining::init_user_mint_info(account);
 
         events::emit_account_event(account_id, addr);
     }
