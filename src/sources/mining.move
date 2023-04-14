@@ -23,9 +23,10 @@ module sea::mining {
 
     struct UserMintInfo has key {
         volume: u64,
+        referer_addr: address,
     }
 
-    struct PoolMintInfo has key {
+    struct MintInfo has key {
         enabled: bool,
         sea_per_second: u64, // SEA issued every second
         last_ts: u64,
@@ -42,7 +43,7 @@ module sea::mining {
     ) {
         assert!(address_of(sender) == @sea, 1);
     
-        move_to(sender, PoolMintInfo {
+        move_to(sender, MintInfo {
             enabled: false,
             sea_per_second: 0,
             last_ts: 0,
@@ -55,18 +56,20 @@ module sea::mining {
     // user should initialize it's mint info
     public entry fun init_user_mint_info(
         account: &signer,
+        referer_addr: address,
     ) {
         if (!exists<UserMintInfo>(address_of(account))) {
             move_to(account, UserMintInfo {
-                volume: 0
+                volume: 0,
+                referer_addr: referer_addr,
             });
         };
     }
 
     public fun claim_reward(
         account: &signer,
-    ) acquires UserMintInfo, PoolMintInfo {
-        let pool_info = borrow_global_mut<PoolMintInfo>(@sea);
+    ) acquires UserMintInfo, MintInfo {
+        let pool_info = borrow_global_mut<MintInfo>(@sea);
         assert!(pool_info.enabled, E_MINT_DISABLED);
 
         update_pool_info(pool_info);
@@ -80,6 +83,9 @@ module sea::mining {
         assert!(reward <= pool_info.pool_sea, E_NOT_ENOUGH_SEA);
         sea::mint(account, reward);
 
+        // mint referer reward if exists: 5%
+        // mint dev team reward
+
         pool_info.total_volume = pool_info.total_volume - maker_info.volume;
         pool_info.pool_sea = pool_info.pool_sea - reward;
         maker_info.volume = 0;
@@ -88,8 +94,8 @@ module sea::mining {
     public(friend) fun on_trade(
         taker_addr: address,
         maker_addr: address,
-        vol: u64) acquires UserMintInfo, PoolMintInfo {
-        let pool_info = borrow_global_mut<PoolMintInfo>(@sea);
+        vol: u64) acquires UserMintInfo, MintInfo {
+        let pool_info = borrow_global_mut<MintInfo>(@sea);
         if (!pool_info.enabled) {
             return
         };
@@ -110,8 +116,8 @@ module sea::mining {
 
     public(friend) fun on_swap(
         taker: &signer,
-        vol: u64) acquires UserMintInfo, PoolMintInfo {
-        let pool_info = borrow_global_mut<PoolMintInfo>(@sea);
+        vol: u64) acquires UserMintInfo, MintInfo {
+        let pool_info = borrow_global_mut<MintInfo>(@sea);
         if (!pool_info.enabled) {
             return
         };
@@ -133,9 +139,9 @@ module sea::mining {
         admin: &signer,
         enabled: bool,
         sea_per_second: u64,
-    ) acquires PoolMintInfo {
+    ) acquires MintInfo {
         assert!(address_of(admin) == @sea, 1);
-        let pool_info = borrow_global_mut<PoolMintInfo>(@sea);
+        let pool_info = borrow_global_mut<MintInfo>(@sea);
 
         pool_info.enabled = enabled;
         pool_info.sea_per_second = sea_per_second;
@@ -145,7 +151,7 @@ module sea::mining {
     // Private functions ====================================================
 
     fun update_pool_info(
-        pool: &mut PoolMintInfo,
+        pool: &mut MintInfo,
     ) {
         let ts = timestamp::now_seconds();
         if (ts > pool.last_ts) {

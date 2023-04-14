@@ -70,7 +70,8 @@ module sea::escrow {
             quote_map: table::new<TypeInfo, u64>(),
             // assets_map: table::new<u64, u64>(),
             address_map: table::new<address, u64>(),
-            account_map: table::new<u64, address>()
+            account_map: table::new<u64, address>(),
+            referer_map: table::new<u64, address>(),
         });
 
         // the resource account signer
@@ -78,7 +79,7 @@ module sea::escrow {
         move_to(sea_admin, SpotEscrowAccountCapability { signer_cap });
     }
 
-    public entry fun register_account(account: &signer) acquires EscrowAccountAsset {
+    public entry fun register_account(account: &signer, referer_addr: address) acquires EscrowAccountAsset {
         let addr = address_of(account);
         let ref = borrow_global_mut<EscrowAccountAsset>(@sea);
         assert!(!table::contains<address, u64>(&ref.address_map, addr), E_ACCOUNT_REGISTERED);
@@ -86,9 +87,9 @@ module sea::escrow {
         ref.n_account = account_id;
         table::add(&mut ref.address_map, addr, account_id);
         table::add(&mut ref.account_map, account_id, addr);
-
+        
         // user mining info
-        mining::init_user_mint_info(account);
+        mining::init_user_mint_info(account, referer_addr);
 
         events::emit_account_event(account_id, addr);
     }
