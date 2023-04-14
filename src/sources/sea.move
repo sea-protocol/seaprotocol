@@ -14,8 +14,6 @@ module sea::sea {
     use std::signer::address_of;
     use aptos_framework::coin::{Self, BurnCapability, MintCapability};
 
-    use sea::utils;
-
     struct SEA {}
     
     const E_NO_AUTH: u64 = 1;
@@ -94,7 +92,7 @@ module sea::sea {
     }
 
     public(friend) fun mint(
-        account: &signer,
+        addr: address,
         amount: u64,
     ) acquires Capabilities {
         let capabilities = borrow_global_mut<Capabilities<SEA>>(@sea);
@@ -105,7 +103,7 @@ module sea::sea {
         let coins_minted = coin::mint(amount, &capabilities.mint_cap);
         capabilities.supply = capabilities.supply + amount;
 
-        utils::register_coin_if_not_exist<SEA>(account);
-        coin::deposit(address_of(account), coins_minted);
+        // utils::register_coin_if_not_exist<SEA>(account);
+        coin::deposit(addr, coins_minted);
     }
 }

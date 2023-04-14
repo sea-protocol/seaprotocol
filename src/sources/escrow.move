@@ -19,6 +19,8 @@ module sea::escrow {
     use sea::spot_account;
     use sea::events;
     use sea::mining;
+    use sea::utils;
+    use sea::sea::SEA;
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     friend sea::market;
@@ -39,17 +41,9 @@ module sea::escrow {
         n_account: u64,
         coin_map: Table<TypeInfo, u64>,
         quote_map: Table<TypeInfo, u64>,
-        // assets_map: Table<u64, u64>,
         address_map: Table<address, u64>,
         account_map: Table<u64, address>,
     }
-
-    // store in account
-    // struct AccountEscrow<phantom CoinType> has key {
-    //     // key is coin_id
-    //     // frozen: Coin<CoinType>,
-    //     available: Coin<CoinType>,
-    // }
 
     /// Stores resource account signer capability under Liquidswap account.
     struct SpotEscrowAccountCapability has key {
@@ -71,7 +65,6 @@ module sea::escrow {
             // assets_map: table::new<u64, u64>(),
             address_map: table::new<address, u64>(),
             account_map: table::new<u64, address>(),
-            referer_map: table::new<u64, address>(),
         });
 
         // the resource account signer
@@ -87,9 +80,12 @@ module sea::escrow {
         ref.n_account = account_id;
         table::add(&mut ref.address_map, addr, account_id);
         table::add(&mut ref.account_map, account_id, addr);
-        
+
         // user mining info
         mining::init_user_mint_info(account, referer_addr);
+
+        // create SEA token
+        utils::register_coin_if_not_exist<SEA>(account);
 
         events::emit_account_event(account_id, addr);
     }

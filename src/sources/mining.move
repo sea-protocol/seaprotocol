@@ -32,6 +32,7 @@ module sea::mining {
         last_ts: u64,
         pool_sea: u64,
         total_volume: u64,
+        team_addr: address,
     }
  
     /// Errors ====================================================
@@ -49,6 +50,7 @@ module sea::mining {
             last_ts: 0,
             pool_sea: 0,
             total_volume: 0,
+            team_addr: @sea_team,
         });
     }
 
@@ -69,25 +71,37 @@ module sea::mining {
     public fun claim_reward(
         account: &signer,
     ) acquires UserMintInfo, MintInfo {
-        let pool_info = borrow_global_mut<MintInfo>(@sea);
-        assert!(pool_info.enabled, E_MINT_DISABLED);
+        let mint_info = borrow_global_mut<MintInfo>(@sea);
+        assert!(mint_info.enabled, E_MINT_DISABLED);
 
-        update_pool_info(pool_info);
+        update_pool_info(mint_info);
         let addr = address_of(account);
         let maker_info = borrow_global_mut<UserMintInfo>(addr);
         if (maker_info.volume == 0) {
             return
         };
 
-        let reward = (((maker_info.volume as u128) * (pool_info.pool_sea as u128) / (pool_info.total_volume as u128)) as u64);
-        assert!(reward <= pool_info.pool_sea, E_NOT_ENOUGH_SEA);
-        sea::mint(account, reward);
-
+        let reward = (((maker_info.volume as u128) * (mint_info.pool_sea as u128) / (mint_info.total_volume as u128)) as u64);
+        assert!(reward <= mint_info.pool_sea, E_NOT_ENOUGH_SEA);
+        let trader_reward = reward/2;
+        let team_reward = reward - trader_reward;
+        if (trader_reward > 0) {
+            sea::mint(addr, trader_reward);
+        };
         // mint referer reward if exists: 5%
-        // mint dev team reward
+        if (maker_info.referer_addr != @0x0) {
+            let referer_reward = trader_reward/10;
+            team_reward = team_reward - referer_reward;
+            sea::mint(addr, trader_reward);
+        };
 
-        pool_info.total_volume = pool_info.total_volume - maker_info.volume;
-        pool_info.pool_sea = pool_info.pool_sea - reward;
+        // mint team reward
+        if (mint_info.team_addr != @0x0) {
+            sea::mint(mint_info.team_addr, team_reward);
+        };
+
+        mint_info.total_volume = mint_info.total_volume - maker_info.volume;
+        mint_info.pool_sea = mint_info.pool_sea - reward;
         maker_info.volume = 0;
     }
 
@@ -117,19 +131,17 @@ module sea::mining {
     public(friend) fun on_swap(
         taker: &signer,
         vol: u64) acquires UserMintInfo, MintInfo {
+        let addr = address_of(taker);
+        if (!exists<UserMintInfo>(addr)) {
+            return
+        };
+
         let pool_info = borrow_global_mut<MintInfo>(@sea);
         if (!pool_info.enabled) {
             return
         };
 
-        let addr = address_of(taker);
         pool_info.total_volume = pool_info.total_volume + vol;
-        if (!exists<UserMintInfo>(addr)) {
-            move_to(taker, UserMintInfo {
-                volume: vol
-            });
-            return
-        };
         let info = borrow_global_mut<UserMintInfo>(addr);
         info.volume = info.volume + vol;
     }
@@ -146,6 +158,16 @@ module sea::mining {
         pool_info.enabled = enabled;
         pool_info.sea_per_second = sea_per_second;
         pool_info.last_ts = timestamp::now_seconds();
+    }
+
+    public entry fun set_team_addr(
+        admin: &signer,
+        addr: address,
+    ) acquires MintInfo {
+        assert!(address_of(admin) == @sea, 1);
+        let pool_info = borrow_global_mut<MintInfo>(@sea);
+
+        pool_info.team_addr = addr;
     }
 
     // Private functions ====================================================
