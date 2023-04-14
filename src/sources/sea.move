@@ -95,6 +95,10 @@ module sea::sea {
         addr: address,
         amount: u64,
     ) acquires Capabilities {
+        if (amount == 0) {
+            return
+        };
+        
         let capabilities = borrow_global_mut<Capabilities<SEA>>(@sea);
         if (capabilities.supply + amount >= MAX_SEA_SUPPLY) {
             return

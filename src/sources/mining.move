@@ -33,6 +33,7 @@ module sea::mining {
         pool_sea: u64,
         total_volume: u64,
         team_addr: address,
+        dev_addr: address,
     }
  
     /// Errors ====================================================
@@ -51,6 +52,7 @@ module sea::mining {
             pool_sea: 0,
             total_volume: 0,
             team_addr: @sea_team,
+            dev_addr: @sea_dev,
         });
     }
 
@@ -85,6 +87,7 @@ module sea::mining {
         assert!(reward <= mint_info.pool_sea, E_NOT_ENOUGH_SEA);
         let trader_reward = reward/2;
         let team_reward = reward - trader_reward;
+        let dev_reward = trader_reward/5;
         if (trader_reward > 0) {
             sea::mint(addr, trader_reward);
         };
@@ -96,9 +99,8 @@ module sea::mining {
         };
 
         // mint team reward
-        if (mint_info.team_addr != @0x0) {
-            sea::mint(mint_info.team_addr, team_reward);
-        };
+        sea::mint(mint_info.dev_addr, dev_reward);
+        sea::mint(mint_info.team_addr, team_reward - dev_reward);
 
         mint_info.total_volume = mint_info.total_volume - maker_info.volume;
         mint_info.pool_sea = mint_info.pool_sea - reward;
@@ -168,6 +170,16 @@ module sea::mining {
         let pool_info = borrow_global_mut<MintInfo>(@sea);
 
         pool_info.team_addr = addr;
+    }
+
+    public entry fun set_dev_addr(
+        admin: &signer,
+        addr: address,
+    ) acquires MintInfo {
+        assert!(address_of(admin) == @sea, 1);
+        let pool_info = borrow_global_mut<MintInfo>(@sea);
+
+        pool_info.dev_addr = addr;
     }
 
     // Private functions ====================================================

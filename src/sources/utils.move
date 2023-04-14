@@ -29,7 +29,7 @@ module sea::utils {
             coin::register<CoinType>(account);
         }
     }
-        
+
     // quote_qty = qty * price / price_ratio
     public fun calc_quote_qty(
         qty: u64,
