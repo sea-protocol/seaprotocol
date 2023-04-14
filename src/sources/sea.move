@@ -17,7 +17,7 @@ module sea::sea {
     struct SEA {}
     
     const E_NO_AUTH: u64 = 1;
-    const MAX_SEA_SUPPLY: u64 = 21000000000000; // 21,000,000
+    const MAX_SEA_SUPPLY: u64 = 1000000000000000; // 1 billion
 
     // Friends >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     friend sea::mining;
