@@ -106,6 +106,18 @@ module sea::market {
         // is_market: bool,
     }
 
+    // OrderRequest order request, used in batch operations
+    // struct OrderRequest has copy, drop {
+    //     req_type: u8, // place: 1; cancel: 2
+    //     side: u8,
+    //     qty: u64,
+    //     price: u64,
+    //     quote_qty: u64,
+    //     order_id: u128, // only used in cancel order
+    //     ioc: bool,
+    //     post_only: bool,
+    // }
+
     // OrderInfo order info
     struct OrderInfo has copy, drop {
         side: u8,
@@ -208,6 +220,8 @@ module sea::market {
     // Constants ====================================================
     const BUY:                u8   = 1;
     const SELL:               u8   = 2;
+    const ORDER_TYPE_PLACE:   u8   = 1;
+    const ORDER_TYPE_CANCEL:  u8   = 2;
     const MAX_PAIR_ID:        u64  = 0xffffff;
     const ORDER_ID_MASK:      u64  = 0xffffffffff; // 40 bit, generate order_id
     const MAX_U64:            u128 = 0xffffffffffffffff;
@@ -420,6 +434,56 @@ module sea::market {
             ratio,
             price_coefficient,
         );
+    }
+
+    // do_batch_orders: place batch, cancel batch
+    // opts: side|post_only|ioc
+    public entry fun do_batch_orders<B, Q>(
+        account: &signer,
+        opts: vector<u8>,
+        qtys: vector<u64>,
+        prices: vector<u64>,
+        quote_qtys: vector<u64>,
+    ) acquires Pair, AccountGrids {
+        let len = vector::length(&opts);
+        assert!(len == vector::length(&prices), E_INVALID_PARAM);
+        assert!(len == vector::length(&quote_qtys), E_INVALID_PARAM);
+        let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
+        assert!(!pair.paused, E_PAIR_PAUSED);
+        let account_addr = address_of(account);
+        let account_id = escrow::get_account_id(account_addr);
+
+        let i = 0;
+        while (i < len) {
+            let opt = *vector::borrow(&opts, i);
+            let (side, post_only, ioc) = get_order_opt(opt);
+            let qty = *vector::borrow(&qtys, i);
+            let price = *vector::borrow(&prices, i);
+            let quote_qty = *vector::borrow(&quote_qtys, i);
+            let order = new_order<B, Q>(
+                account,
+                side,
+                qty,
+                quote_qty,
+                account_id,
+                0,
+            );
+            if (post_only) {
+                place_postonly_order_internal<B, Q>(pair, side, price, order);
+            } else {
+                let (completed, base_filled, order_left) = do_match<B, Q>(pair, account_addr, side, price, order, false);
+                if ((!completed) && (!ioc)) {
+                    // make sure order qty >= lot_size
+                    // place order to orderbook
+                    place_part_filled_order(side, account_addr, pair, price, base_filled, order_left);
+                } else {
+                    destroy_order(account_addr, order_left);
+                };
+            };
+            i = i + 1;
+        };
+
+        pair.last_timestamp = timestamp::now_seconds();
     }
 
     // place post only order
@@ -643,7 +707,7 @@ module sea::market {
         side: u8,
         order_key: u128,
         // to_escrow: bool
-        ) acquires Pair {
+    ) acquires Pair {
         let pair = borrow_global_mut<Pair<B, Q>>(@sea_spot);
         let account_addr = address_of(account);
 
@@ -749,6 +813,12 @@ module sea::market {
         } else {
             get_price_steps(&pair.bids)
         }
+    }
+
+    // return: side, post_only, ioc
+    // b100
+    public fun get_order_opt(opt: u8): (u8, bool, bool) {
+        ((opt & 0x3), ((opt & 0x4) != 0), ((opt & 0x8) != 0))
     }
 
     public fun get_pair_both_steps<B, Q>(): (vector<PriceStep>, vector<PriceStep>) acquires Pair {
@@ -889,6 +959,29 @@ module sea::market {
 
         assert!(!pair.paused, E_PAIR_PAUSED);
         assert!(order.account_id > 0, E_INVALID_PARAM);
+
+        place_postonly_order_internal<B, Q>(pair, side, price, order)
+    }
+
+    public fun new_price_step(
+        qty: u64,
+        price: u64,
+        orders: u64
+    ): PriceStep {
+        PriceStep{
+            qty: qty,
+            price: price,
+            orders: orders,
+        }
+    }
+
+    // Private functions ====================================================
+    fun place_postonly_order_internal<B, Q>(
+        pair: &mut Pair<B, Q>,
+        side: u8,
+        price: u64,
+        order: OrderEntity<B, Q>,
+    ): u128 {
         let qty: u64;
         if (side == SELL) {
             let bids = &mut pair.bids;
@@ -917,20 +1010,6 @@ module sea::market {
 
         place_order(side, price, pair, order)
     }
-
-    public fun new_price_step(
-        qty: u64,
-        price: u64,
-        orders: u64
-    ): PriceStep {
-        PriceStep{
-            qty: qty,
-            price: price,
-            orders: orders,
-        }
-    }
-
-    // Private functions ====================================================
 
     fun incr_pair_grid_id<B, Q>(
         pair: &mut Pair<B, Q>
