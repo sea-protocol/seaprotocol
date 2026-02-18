@@ -1,3 +1,8 @@
+# Deprecated
+
+Moved to [https://www.gridtrade.xyz/](https://github.com/sea-dex/gridtrade)
+
+
 # seaprotocol
 We believe anybody has the right to trade any asset anywhere, anytime!
 
