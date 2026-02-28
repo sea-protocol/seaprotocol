@@ -1,6 +1,6 @@
 [package]
 name = "Sea"
-version = "0.1.0" # Per SemVer
+version = "0.2.0" # Per SemVer
 
 [addresses]
 sea = "0xf5de9e9d7a718c10964a8e5ce32de33c591979e2b2e76a1e58dcc9e6f74480df"
