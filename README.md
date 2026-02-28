@@ -1,4 +1,4 @@
-# Deprecated
+# EVM version: GridTrade
 
 Moved to [https://www.gridtrade.xyz/](https://github.com/sea-dex/gridtrade)
 
