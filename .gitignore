@@ -3,3 +3,6 @@ build/
 .env
 docs/
 .VSCodeCounter/
+target
+node_modules
+.next
