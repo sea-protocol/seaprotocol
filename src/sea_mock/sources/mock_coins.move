@@ -19,11 +19,11 @@ module sea::mock_coins {
     const T_ETH_DECIMALS:  u8 = 8;
 
     /// faucet amount
-    const T_USDC_AMT: u64 = 10000*1000000; // 6 decimals
-    const T_USDT_AMT: u64 = 10000*10000;   // 4 decimals
+    const T_USDC_AMT: u64 = 20000*1000000; // 6 decimals
+    const T_USDT_AMT: u64 = 30000*10000;   // 4 decimals
     const T_BTC_AMT: u64 = 1*100000000;    // 8 decimals
-    const T_SEA_AMT: u64 = 100000*10000;   // 4 decimals
-    const T_ETH_AMT: u64 = 100*100000000;  // 8 decimals
+    const T_SEA_AMT: u64 = 1000000*10000;   // 4 decimals
+    const T_ETH_AMT: u64 = 300*100000000;  // 8 decimals
 
     struct FaucetAccounts has key {
         claimed_accounts: SimpleMap<address, bool>,
